@@ -1,0 +1,457 @@
+╭─────────────────────── Traceback (most recent call last) ────────────────────────╮
+│ C:\Users\Lalo\JARVIS\.venv\Lib\site-packages\textual\worker.py:370 in _run       │
+│                                                                                  │
+│   367 │   │   │   self.state = WorkerState.RUNNING                               │
+│   368 │   │   │   app.log.worker(self)                                           │
+│   369 │   │   │   try:                                                           │
+│ ❱ 370 │   │   │   │   self._result = await self.run()                            │
+│   371 │   │   │   except asyncio.CancelledError as error:                        │
+│   372 │   │   │   │   self.state = WorkerState.CANCELLED                         │
+│   373 │   │   │   │   self._error = error                                        │
+│                                                                                  │
+│ ╭─────────────────────────────────── locals ───────────────────────────────────╮ │
+│ │           app = JarvisApp(                                                   │ │
+│ │                 │   title='J.A.R.V.I.S',                                     │ │
+│ │                 │   classes={'-dark-mode'},                                  │ │
+│ │                 │   pseudo_classes={'blur', 'dark'}                          │ │
+│ │                 )                                                            │ │
+│ │         error = JSONDecodeError('Expecting value: line 1 column 1 (char 0)') │ │
+│ │          self = <Worker                                                      │ │
+│ │                 │   ERROR                                                    │ │
+│ │                 │   name='process_message'                                   │ │
+│ │                 │   description="process_message('what time is it?')"        │ │
+│ │                 >                                                            │ │
+│ │ worker_failed = WorkerFailed("Worker raised exception:                       │ │
+│ │                 JSONDecodeError('Expecting value: line 1 column 1 (char      │ │
+│ │                 0)')")                                                       │ │
+│ ╰──────────────────────────────────────────────────────────────────────────────╯ │
+│                                                                                  │
+│ C:\Users\Lalo\JARVIS\.venv\Lib\site-packages\textual\worker.py:354 in run        │
+│                                                                                  │
+│   351 │   │   Returns:                                                           │
+│   352 │   │   │   Return value of the work.                                      │
+│   353 │   │   """                                                                │
+│ ❱ 354 │   │   return await (                                                     │
+│   355 │   │   │   self._run_threaded() if self._thread_worker else self._run_asy │
+│   356 │   │   )                                                                  │
+│   357                                                                            │
+│                                                                                  │
+│ ╭─────────────────────────── locals ───────────────────────────╮                 │
+│ │ self = <Worker                                               │                 │
+│ │        │   ERROR                                             │                 │
+│ │        │   name='process_message'                            │                 │
+│ │        │   description="process_message('what time is it?')" │                 │
+│ │        >                                                     │                 │
+│ ╰──────────────────────────────────────────────────────────────╯                 │
+│                                                                                  │
+│ C:\Users\Lalo\JARVIS\.venv\Lib\site-packages\textual\worker.py:339 in _run_async │
+│                                                                                  │
+│   336 │   │   │   or hasattr(self._work, "func")                                 │
+│   337 │   │   │   and inspect.iscoroutinefunction(self._work.func)               │
+│   338 │   │   ):                                                                 │
+│ ❱ 339 │   │   │   return await self._work()                                      │
+│   340 │   │   elif inspect.isawaitable(self._work):                              │
+│   341 │   │   │   return await self._work                                        │
+│   342 │   │   elif callable(self._work):                                         │
+│                                                                                  │
+│ ╭─────────────────────────── locals ───────────────────────────╮                 │
+│ │ self = <Worker                                               │                 │
+│ │        │   ERROR                                             │                 │
+│ │        │   name='process_message'                            │                 │
+│ │        │   description="process_message('what time is it?')" │                 │
+│ │        >                                                     │                 │
+│ ╰──────────────────────────────────────────────────────────────╯                 │
+│                                                                                  │
+│ C:\Users\Lalo\JARVIS\jarvis\__main__.py:923 in process_message                   │
+│                                                                                  │
+│    920 │   │   │   self.messages.append(                                         │
+│    921 │   │   │   │   {"role": "assistant", "content": full_response, "tool_cal │
+│    922 │   │   │   )                                                             │
+│ ❱  923 │   │   │   tool_results = await self.process_tool_calls(tool_calls, tool │
+│    924 │   │   │   log.warning(f"[TUI] Tool results received: {len(tool_results) │
+│    925 │   │   │   for i, tr in enumerate(tool_results):                         │
+│    926 │   │   │   │   content = tr.get("content", "")                           │
+│                                                                                  │
+│ ╭─────────────────────────────────── locals ───────────────────────────────────╮ │
+│ │          backend = 'copilot'                                                 │ │
+│ │            calls = [                                                         │ │
+│ │                    │   {                                                     │ │
+│ │                    │   │   'id': 'tooluse_CCiunm7jRWiiYrC2Ex579w',           │ │
+│ │                    │   │   'type': 'function',                               │ │
+│ │                    │   │   'function': {                                     │ │
+│ │                    │   │   │   'name': 'get_current_time',                   │ │
+│ │                    │   │   │   'arguments': ''                               │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   }                                                     │ │
+│ │                    ]                                                         │ │
+│ │             chat = VerticalScroll(id='chat-scroll')                          │ │
+│ │            chunk = {                                                         │ │
+│ │                    │   'message': {                                          │ │
+│ │                    │   │   'tool_calls': [                                   │ │
+│ │                    │   │   │   {                                             │ │
+│ │                    │   │   │   │   'id': 'tooluse_CCiunm7jRWiiYrC2Ex579w',   │ │
+│ │                    │   │   │   │   'type': 'function',                       │ │
+│ │                    │   │   │   │   'function': {                             │ │
+│ │                    │   │   │   │   │   'name': 'get_current_time',           │ │
+│ │                    │   │   │   │   │   'arguments': ''                       │ │
+│ │                    │   │   │   │   }                                         │ │
+│ │                    │   │   │   }                                             │ │
+│ │                    │   │   ]                                                 │ │
+│ │                    │   },                                                    │ │
+│ │                    │   'done': True                                          │ │
+│ │                    }                                                         │ │
+│ │      chunk_count = 4                                                         │ │
+│ │           client = <core.llm.copilot.CopilotClient object at                 │ │
+│ │                    0x000001D184FF9430>                                       │ │
+│ │          content = None                                                      │ │
+│ │             core = CoreDisplay(id='core-display')                            │ │
+│ │    full_response = ''                                                        │ │
+│ │            model = 'claude-sonnet-4.5'                                       │ │
+│ │              msg = {                                                         │ │
+│ │                    │   'tool_calls': [                                       │ │
+│ │                    │   │   {                                                 │ │
+│ │                    │   │   │   'id': 'tooluse_CCiunm7jRWiiYrC2Ex579w',       │ │
+│ │                    │   │   │   'type': 'function',                           │ │
+│ │                    │   │   │   'function': {                                 │ │
+│ │                    │   │   │   │   'name': 'get_current_time',               │ │
+│ │                    │   │   │   │   'arguments': ''                           │ │
+│ │                    │   │   │   }                                             │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   ]                                                     │ │
+│ │                    }                                                         │ │
+│ │          schemas = [                                                         │ │
+│ │                    │   {                                                     │ │
+│ │                    │   │   'type': 'function',                               │ │
+│ │                    │   │   'function': {                                     │ │
+│ │                    │   │   │   'name': 'get_current_time',                   │ │
+│ │                    │   │   │   'description': 'Get the current date and      │ │
+│ │                    time, optionally for a specific timezone',                │ │
+│ │                    │   │   │   'parameters': {                               │ │
+│ │                    │   │   │   │   'type': 'object',                         │ │
+│ │                    │   │   │   │   'properties': {                           │ │
+│ │                    │   │   │   │   │   'timezone': {                         │ │
+│ │                    │   │   │   │   │   │   'type': 'string',                 │ │
+│ │                    │   │   │   │   │   │   'description': "Timezone (e.g.,   │ │
+│ │                    'America/New_York', 'UTC'). Defaults to local."           │ │
+│ │                    │   │   │   │   │   }                                     │ │
+│ │                    │   │   │   │   },                                        │ │
+│ │                    │   │   │   │   'required': []                            │ │
+│ │                    │   │   │   }                                             │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   },                                                    │ │
+│ │                    │   {                                                     │ │
+│ │                    │   │   'type': 'function',                               │ │
+│ │                    │   │   'function': {                                     │ │
+│ │                    │   │   │   'name': 'set_timer',                          │ │
+│ │                    │   │   │   'description': 'Set a timer for a specified   │ │
+│ │                    duration',                                                │ │
+│ │                    │   │   │   'parameters': {                               │ │
+│ │                    │   │   │   │   'type': 'object',                         │ │
+│ │                    │   │   │   │   'properties': {                           │ │
+│ │                    │   │   │   │   │   'seconds': {                          │ │
+│ │                    │   │   │   │   │   │   'type': 'integer',                │ │
+│ │                    │   │   │   │   │   │   'description': 'Duration in       │ │
+│ │                    seconds'                                                  │ │
+│ │                    │   │   │   │   │   },                                    │ │
+│ │                    │   │   │   │   │   'label': {                            │ │
+│ │                    │   │   │   │   │   │   'type': 'string',                 │ │
+│ │                    │   │   │   │   │   │   'description': 'Optional label    │ │
+│ │                    for the timer'                                            │ │
+│ │                    │   │   │   │   │   }                                     │ │
+│ │                    │   │   │   │   },                                        │ │
+│ │                    │   │   │   │   'required': ['seconds']                   │ │
+│ │                    │   │   │   }                                             │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   },                                                    │ │
+│ │                    │   {                                                     │ │
+│ │                    │   │   'type': 'function',                               │ │
+│ │                    │   │   'function': {                                     │ │
+│ │                    │   │   │   'name': 'launch_app',                         │ │
+│ │                    │   │   │   'description': 'Launch an application by      │ │
+│ │                    name',                                                    │ │
+│ │                    │   │   │   'parameters': {                               │ │
+│ │                    │   │   │   │   'type': 'object',                         │ │
+│ │                    │   │   │   │   'properties': {                           │ │
+│ │                    │   │   │   │   │   'app_name': {                         │ │
+│ │                    │   │   │   │   │   │   'type': 'string',                 │ │
+│ │                    │   │   │   │   │   │   'description': "App name to       │ │
+│ │                    launch (e.g., 'notepad', 'zen', 'discord')"               │ │
+│ │                    │   │   │   │   │   }                                     │ │
+│ │                    │   │   │   │   },                                        │ │
+│ │                    │   │   │   │   'required': ['app_name']                  │ │
+│ │                    │   │   │   }                                             │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   },                                                    │ │
+│ │                    │   {                                                     │ │
+│ │                    │   │   'type': 'function',                               │ │
+│ │                    │   │   'function': {                                     │ │
+│ │                    │   │   │   'name': 'list_open_apps',                     │ │
+│ │                    │   │   │   'description': 'List currently running        │ │
+│ │                    applications/windows',                                    │ │
+│ │                    │   │   │   'parameters': {                               │ │
+│ │                    │   │   │   │   'type': 'object',                         │ │
+│ │                    │   │   │   │   'properties': {},                         │ │
+│ │                    │   │   │   │   'required': []                            │ │
+│ │                    │   │   │   }                                             │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   },                                                    │ │
+│ │                    │   {                                                     │ │
+│ │                    │   │   'type': 'function',                               │ │
+│ │                    │   │   'function': {                                     │ │
+│ │                    │   │   │   'name': 'open_url',                           │ │
+│ │                    │   │   │   'description': 'Open a URL in the default     │ │
+│ │                    browser (Zen)',                                           │ │
+│ │                    │   │   │   'parameters': {                               │ │
+│ │                    │   │   │   │   'type': 'object',                         │ │
+│ │                    │   │   │   │   'properties': {                           │ │
+│ │                    │   │   │   │   │   'url': {                              │ │
+│ │                    │   │   │   │   │   │   'type': 'string',                 │ │
+│ │                    │   │   │   │   │   │   'description': 'The URL to open'  │ │
+│ │                    │   │   │   │   │   },                                    │ │
+│ │                    │   │   │   │   │   'browser': {                          │ │
+│ │                    │   │   │   │   │   │   'type': 'string',                 │ │
+│ │                    │   │   │   │   │   │   'description': 'Specific browser  │ │
+│ │                    to use (default: zen)'                                    │ │
+│ │                    │   │   │   │   │   }                                     │ │
+│ │                    │   │   │   │   },                                        │ │
+│ │                    │   │   │   │   'required': ['url']                       │ │
+│ │                    │   │   │   }                                             │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   },                                                    │ │
+│ │                    │   {                                                     │ │
+│ │                    │   │   'type': 'function',                               │ │
+│ │                    │   │   'function': {                                     │ │
+│ │                    │   │   │   'name': 'run_command',                        │ │
+│ │                    │   │   │   'description': 'Run a shell command           │ │
+│ │                    (restricted to safe commands)',                           │ │
+│ │                    │   │   │   'parameters': {                               │ │
+│ │                    │   │   │   │   'type': 'object',                         │ │
+│ │                    │   │   │   │   'properties': {                           │ │
+│ │                    │   │   │   │   │   'command': {                          │ │
+│ │                    │   │   │   │   │   │   'type': 'string',                 │ │
+│ │                    │   │   │   │   │   │   'description': 'The command to    │ │
+│ │                    execute'                                                  │ │
+│ │                    │   │   │   │   │   },                                    │ │
+│ │                    │   │   │   │   │   'timeout': {                          │ │
+│ │                    │   │   │   │   │   │   'type': 'integer',                │ │
+│ │                    │   │   │   │   │   │   'description': 'Timeout in        │ │
+│ │                    seconds (default: 30, max: 60)'                           │ │
+│ │                    │   │   │   │   │   }                                     │ │
+│ │                    │   │   │   │   },                                        │ │
+│ │                    │   │   │   │   'required': ['command']                   │ │
+│ │                    │   │   │   }                                             │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   },                                                    │ │
+│ │                    │   {                                                     │ │
+│ │                    │   │   'type': 'function',                               │ │
+│ │                    │   │   'function': {                                     │ │
+│ │                    │   │   │   'name': 'web_search',                         │ │
+│ │                    │   │   │   'description': 'Search the web for            │ │
+│ │                    information using DuckDuckGo',                            │ │
+│ │                    │   │   │   'parameters': {                               │ │
+│ │                    │   │   │   │   'type': 'object',                         │ │
+│ │                    │   │   │   │   'properties': {                           │ │
+│ │                    │   │   │   │   │   'query': {                            │ │
+│ │                    │   │   │   │   │   │   'type': 'string',                 │ │
+│ │                    │   │   │   │   │   │   'description': 'The search query' │ │
+│ │                    │   │   │   │   │   },                                    │ │
+│ │                    │   │   │   │   │   'num_results': {                      │ │
+│ │                    │   │   │   │   │   │   'type': 'integer',                │ │
+│ │                    │   │   │   │   │   │   'description': 'Number of results │ │
+│ │                    to return (default: 5, max: 10)'                          │ │
+│ │                    │   │   │   │   │   }                                     │ │
+│ │                    │   │   │   │   },                                        │ │
+│ │                    │   │   │   │   'required': ['query']                     │ │
+│ │                    │   │   │   }                                             │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   },                                                    │ │
+│ │                    │   {                                                     │ │
+│ │                    │   │   'type': 'function',                               │ │
+│ │                    │   │   'function': {                                     │ │
+│ │                    │   │   │   'name': 'fetch_url',                          │ │
+│ │                    │   │   │   'description': 'Fetch content from a URL',    │ │
+│ │                    │   │   │   'parameters': {                               │ │
+│ │                    │   │   │   │   'type': 'object',                         │ │
+│ │                    │   │   │   │   'properties': {                           │ │
+│ │                    │   │   │   │   │   'url': {                              │ │
+│ │                    │   │   │   │   │   │   'type': 'string',                 │ │
+│ │                    │   │   │   │   │   │   'description': 'The URL to fetch' │ │
+│ │                    │   │   │   │   │   }                                     │ │
+│ │                    │   │   │   │   },                                        │ │
+│ │                    │   │   │   │   'required': ['url']                       │ │
+│ │                    │   │   │   }                                             │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   },                                                    │ │
+│ │                    │   {                                                     │ │
+│ │                    │   │   'type': 'function',                               │ │
+│ │                    │   │   'function': {                                     │ │
+│ │                    │   │   │   'name': 'read_file',                          │ │
+│ │                    │   │   │   'description': 'Read the contents of a file', │ │
+│ │                    │   │   │   'parameters': {                               │ │
+│ │                    │   │   │   │   'type': 'object',                         │ │
+│ │                    │   │   │   │   'properties': {                           │ │
+│ │                    │   │   │   │   │   'path': {                             │ │
+│ │                    │   │   │   │   │   │   'type': 'string',                 │ │
+│ │                    │   │   │   │   │   │   'description': 'Path to the file  │ │
+│ │                    to read'                                                  │ │
+│ │                    │   │   │   │   │   },                                    │ │
+│ │                    │   │   │   │   │   'max_lines': {                        │ │
+│ │                    │   │   │   │   │   │   'type': 'integer',                │ │
+│ │                    │   │   │   │   │   │   'description': 'Maximum number of │ │
+│ │                    lines to read (default: 500)'                             │ │
+│ │                    │   │   │   │   │   }                                     │ │
+│ │                    │   │   │   │   },                                        │ │
+│ │                    │   │   │   │   'required': ['path']                      │ │
+│ │                    │   │   │   }                                             │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   },                                                    │ │
+│ │                    │   {                                                     │ │
+│ │                    │   │   'type': 'function',                               │ │
+│ │                    │   │   'function': {                                     │ │
+│ │                    │   │   │   'name': 'write_file',                         │ │
+│ │                    │   │   │   'description': 'Write content to a file       │ │
+│ │                    (creates or overwrites)',                                 │ │
+│ │                    │   │   │   'parameters': {                               │ │
+│ │                    │   │   │   │   'type': 'object',                         │ │
+│ │                    │   │   │   │   'properties': {                           │ │
+│ │                    │   │   │   │   │   'path': {                             │ │
+│ │                    │   │   │   │   │   │   'type': 'string',                 │ │
+│ │                    │   │   │   │   │   │   'description': 'Path to the file  │ │
+│ │                    to write'                                                 │ │
+│ │                    │   │   │   │   │   },                                    │ │
+│ │                    │   │   │   │   │   'content': {                          │ │
+│ │                    │   │   │   │   │   │   'type': 'string',                 │ │
+│ │                    │   │   │   │   │   │   'description': 'Content to write  │ │
+│ │                    to the file'                                              │ │
+│ │                    │   │   │   │   │   },                                    │ │
+│ │                    │   │   │   │   │   'append': {                           │ │
+│ │                    │   │   │   │   │   │   'type': 'boolean',                │ │
+│ │                    │   │   │   │   │   │   'description': 'Append to file    │ │
+│ │                    instead of overwriting (default: false)'                  │ │
+│ │                    │   │   │   │   │   }                                     │ │
+│ │                    │   │   │   │   },                                        │ │
+│ │                    │   │   │   │   'required': ['path', 'content']           │ │
+│ │                    │   │   │   }                                             │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   },                                                    │ │
+│ │                    │   ... +81                                               │ │
+│ │                    ]                                                         │ │
+│ │             self = JarvisApp(                                                │ │
+│ │                    │   title='J.A.R.V.I.S',                                  │ │
+│ │                    │   classes={'-dark-mode'},                               │ │
+│ │                    │   pseudo_classes={'blur', 'dark'}                       │ │
+│ │                    )                                                         │ │
+│ │ streaming_bubble = StreamingBubble()                                         │ │
+│ │         thinking = Static(id='thinking-line')                                │ │
+│ │    tool_activity = ToolActivity(id='tool-activity')                          │ │
+│ │       tool_calls = [                                                         │ │
+│ │                    │   {                                                     │ │
+│ │                    │   │   'id': 'tooluse_CCiunm7jRWiiYrC2Ex579w',           │ │
+│ │                    │   │   'type': 'function',                               │ │
+│ │                    │   │   'function': {                                     │ │
+│ │                    │   │   │   'name': 'get_current_time',                   │ │
+│ │                    │   │   │   'arguments': ''                               │ │
+│ │                    │   │   }                                                 │ │
+│ │                    │   }                                                     │ │
+│ │                    ]                                                         │ │
+│ │       user_input = 'what time is it?'                                        │ │
+│ ╰──────────────────────────────────────────────────────────────────────────────╯ │
+│                                                                                  │
+│ C:\Users\Lalo\JARVIS\jarvis\__main__.py:976 in process_tool_calls                │
+│                                                                                  │
+│    973 │   │   │   args = fn.get("arguments", {})                                │
+│    974 │   │   │   tool_call_id = call.get("id", "")                             │
+│    975 │   │   │   if isinstance(args, str):                                     │
+│ ❱  976 │   │   │   │   args = json.loads(args)                                   │
+│    977 │   │   │   log.warning(f"[TUI] Executing tool: {name} with args: {args}" │
+│    978 │   │   │   activity.add_activity(name, "running")                        │
+│    979 │   │   │   result = await self.tools.execute(name, **args)               │
+│                                                                                  │
+│ ╭─────────────────────────────────── locals ───────────────────────────────────╮ │
+│ │     activity = ToolActivity(id='tool-activity')                              │ │
+│ │         args = ''                                                            │ │
+│ │         call = {                                                             │ │
+│ │                │   'id': 'tooluse_CCiunm7jRWiiYrC2Ex579w',                   │ │
+│ │                │   'type': 'function',                                       │ │
+│ │                │   'function': {                                             │ │
+│ │                │   │   'name': 'get_current_time',                           │ │
+│ │                │   │   'arguments': ''                                       │ │
+│ │                │   }                                                         │ │
+│ │                }                                                             │ │
+│ │           fn = {'name': 'get_current_time', 'arguments': ''}                 │ │
+│ │         name = 'get_current_time'                                            │ │
+│ │      results = []                                                            │ │
+│ │         self = JarvisApp(                                                    │ │
+│ │                │   title='J.A.R.V.I.S',                                      │ │
+│ │                │   classes={'-dark-mode'},                                   │ │
+│ │                │   pseudo_classes={'blur', 'dark'}                           │ │
+│ │                )                                                             │ │
+│ │ tool_call_id = 'tooluse_CCiunm7jRWiiYrC2Ex579w'                              │ │
+│ │   tool_calls = [                                                             │ │
+│ │                │   {                                                         │ │
+│ │                │   │   'id': 'tooluse_CCiunm7jRWiiYrC2Ex579w',               │ │
+│ │                │   │   'type': 'function',                                   │ │
+│ │                │   │   'function': {                                         │ │
+│ │                │   │   │   'name': 'get_current_time',                       │ │
+│ │                │   │   │   'arguments': ''                                   │ │
+│ │                │   │   }                                                     │ │
+│ │                │   }                                                         │ │
+│ │                ]                                                             │ │
+│ ╰──────────────────────────────────────────────────────────────────────────────╯ │
+│                                                                                  │
+│ C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\j │
+│ son\__init__.py:346 in loads                                                     │
+│                                                                                  │
+│   343 │   if (cls is None and object_hook is None and                            │
+│   344 │   │   │   parse_int is None and parse_float is None and                  │
+│   345 │   │   │   parse_constant is None and object_pairs_hook is None and not k │
+│ ❱ 346 │   │   return _default_decoder.decode(s)                                  │
+│   347 │   if cls is None:                                                        │
+│   348 │   │   cls = JSONDecoder                                                  │
+│   349 │   if object_hook is not None:                                            │
+│                                                                                  │
+│ ╭───────── locals ─────────╮                                                     │
+│ │               cls = None │                                                     │
+│ │                kw = {}   │                                                     │
+│ │       object_hook = None │                                                     │
+│ │ object_pairs_hook = None │                                                     │
+│ │    parse_constant = None │                                                     │
+│ │       parse_float = None │                                                     │
+│ │         parse_int = None │                                                     │
+│ │                 s = ''   │                                                     │
+│ ╰──────────────────────────╯                                                     │
+│                                                                                  │
+│ C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\j │
+│ son\decoder.py:338 in decode                                                     │
+│                                                                                  │
+│   335 │   │   containing a JSON document).                                       │
+│   336 │   │                                                                      │
+│   337 │   │   """                                                                │
+│ ❱ 338 │   │   obj, end = self.raw_decode(s, idx=_w(s, 0).end())                  │
+│   339 │   │   end = _w(s, end).end()                                             │
+│   340 │   │   if end != len(s):                                                  │
+│   341 │   │   │   raise JSONDecodeError("Extra data", s, end)                    │
+│                                                                                  │
+│ ╭───────────────────────────────── locals ──────────────────────────────────╮    │
+│ │   _w = <built-in method match of re.Pattern object at 0x000001D1683B3E00> │    │
+│ │    s = ''                                                                 │    │
+│ │ self = <json.decoder.JSONDecoder object at 0x000001D168402C90>            │    │
+│ ╰───────────────────────────────────────────────────────────────────────────╯    │
+│                                                                                  │
+│ C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\j │
+│ son\decoder.py:356 in raw_decode                                                 │
+│                                                                                  │
+│   353 │   │   try:                                                               │
+│   354 │   │   │   obj, end = self.scan_once(s, idx)                              │
+│   355 │   │   except StopIteration as err:                                       │
+│ ❱ 356 │   │   │   raise JSONDecodeError("Expecting value", s, err.value) from No │
+│   357 │   │   return obj, end                                                    │
+│   358                                                                            │
+│                                                                                  │
+│ ╭──────────────────────────── locals ────────────────────────────╮               │
+│ │  idx = 0                                                       │               │
+│ │    s = ''                                                      │               │
+│ │ self = <json.decoder.JSONDecoder object at 0x000001D168402C90> │               │
+│ ╰────────────────────────────────────────────────────────────────╯               │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+JSONDecodeError: Expecting value: line 1 column 1 (char 0)

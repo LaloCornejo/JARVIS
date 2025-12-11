@@ -1,0 +1,72 @@
+jarvis:
+  name: "JARVIS"
+  wake_word: "hey jarvis"
+
+llm:
+  backend: gemini
+  api_url: http://localhost:11434
+  primary_model: copilot/claude-sonnet-4.5
+  fast_model: gemini-2.5-flash
+  fallback_model: qwen3:1.7b
+  temperature: 0.7
+  stream: true
+
+gemini:
+  api_key_env: GEMINI_API_KEY
+  default_model: gemini-2.5-flash
+  vision_model: gemini-2.5-flash
+  models:
+    - gemini-2.5-flash
+    - gemini-2.5-pro
+
+ollama:
+  api_url: http://localhost:11434
+  vision_model: qwen3:1.7b
+  fast_model: qwen3:1.7b
+  preload: true
+
+voice_input:
+  stt_backend: faster-whisper
+  model: base.en
+  device: cuda
+  compute_type: float16
+  vad: silero
+  silence_duration: 0.5
+  input_device: 2 # Realtek mic
+
+tts:
+  engine: xtts
+  base_url: http://localhost:8020
+  speaker: duckie
+  language: en
+  sample_rate: 24000
+
+browser:
+  default: zen
+  automation: playwright
+
+tools:
+  enabled:
+    - web_search
+    - time
+    - memory
+    - file_search
+    - system_control
+  require_approval:
+    - file_modify
+    - system_settings
+    - terminal
+
+memory:
+  vector_db: lancedb
+  embedding_model: all-MiniLM-L6-v2
+  db_path: ./data/vectors
+
+security:
+  offline_mode: false
+  encrypt_memory: true
+  terminal_whitelist:
+    - ls
+    - cat
+    - grep
+    - python
