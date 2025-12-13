@@ -18,6 +18,10 @@ from tools.files import (
     SearchFilesTool,
     WriteFileTool,
 )
+from tools.high_perf_tools import (
+    HighPerfDataProcessorTool,
+    HighPerfFileAnalyzerTool,
+)
 from tools.integrations import (
     CalendarCreateEventTool,
     CalendarDeleteEventTool,
@@ -98,29 +102,29 @@ from tools.memory import (
     RecallMemoryTool,
     StoreMemoryTool,
 )
-from tools.high_perf_tools import (
-    HighPerfDataProcessorTool,
-    HighPerfFileAnalyzerTool,
-)
 from tools.rust_performance_tools import (
+    RustDataExtractorTool,
     RustFileSearchTool,
     RustLineCountTool,
-    RustDataExtractorTool,
 )
 from tools.system import (
     GetCurrentTimeTool,
     LaunchAppTool,
     ListOpenAppsTool,
+    MuteToggleTool,
     OpenUrlTool,
     RunCommandTool,
     SetTimerTool,
+    SetVolumeTool,
+    VolumeDownTool,
+    VolumeUpTool,
 )
 from tools.web import FetchUrlTool, WebSearchTool
 
 console = Console()
 
 TOOL_CATEGORIES = {
-    "system": {
+"system": {
         "tools": [
             "get_current_time",
             "set_timer",
@@ -128,6 +132,10 @@ TOOL_CATEGORIES = {
             "list_open_apps",
             "open_url",
             "run_command",
+            "volume_up",
+            "volume_down",
+            "mute_toggle",
+            "set_volume",
         ],
         "keywords": [
             "time",
@@ -148,6 +156,13 @@ TOOL_CATEGORIES = {
             "url",
             "website",
             "browser",
+            "volume",
+            "sound",
+            "audio",
+            "mute",
+            "loud",
+            "quiet",
+            "speaker",
         ],
     },
     "files": {
@@ -414,6 +429,10 @@ RUST_TOOLS = {
     "list_directory",
     "search_files",
     "file_info",
+    "volume_up",
+    "volume_down",
+    "mute_toggle",
+    "set_volume",
 }
 
 _registry_instance: ToolRegistry | None = None
@@ -538,6 +557,10 @@ class ToolRegistry:
             RustDataExtractorTool(),   # High-performance data extraction
             HighPerfDataProcessorTool(),   # Intelligent high-performance data processor
             HighPerfFileAnalyzerTool(),    # Parallel file analyzer
+            VolumeUpTool(),            # System volume control
+            VolumeDownTool(),          # System volume control
+            MuteToggleTool(),          # System volume control
+            SetVolumeTool(),           # System volume control
         ]
         for tool in default_tools:
             self.register(tool)
@@ -570,7 +593,9 @@ class ToolRegistry:
         }
         bg_color = color_map.get(name, "white")  # White default
 
-        logging.info(f"[{bg_color}]Starting Rust tool: {name} with args: {kwargs}[/{bg_color}]")
+        logging.info(
+            f"[{bg_color}]Starting Rust tool: {name} with args: {kwargs}[/{bg_color}]"
+        )
         binary_map = {
             "read_file": "read_file",
             "write_file": "write_file",
@@ -582,6 +607,10 @@ class ToolRegistry:
             "run_command": "run_command",
             "execute_python": "execute_python",
             "fetch_url": "fetch_url",
+            "volume_up": "system-control",
+            "volume_down": "system-control",
+            "mute_toggle": "system-control",
+            "set_volume": "system-control",
         }
         binary = binary_map[name]
         if platform.system() == "Windows":
@@ -612,6 +641,10 @@ class ToolRegistry:
             args.extend([kwargs["code"], str(kwargs.get("timeout", 30))])
         elif name == "fetch_url":
             args.append(kwargs["url"])
+        elif name in ["volume_up", "volume_down", "mute_toggle"]:
+            args.append(name)
+        elif name == "set_volume":
+            args.extend([name, str(kwargs["level"])])
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
