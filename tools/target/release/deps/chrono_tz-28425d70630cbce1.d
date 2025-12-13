@@ -1,0 +1,15 @@
+C:\Users\Lalo\JARVIS\tools\target\release\deps\libchrono_tz-28425d70630cbce1.rmeta: C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\lib.rs C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\binary_search.rs C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\directory.rs C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\timezone_impl.rs C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\timezones.rs C:\Users\Lalo\JARVIS\tools\target\release\build\chrono-tz-a5f17ddb587d71c4\out/directory.rs C:\Users\Lalo\JARVIS\tools\target\release\build\chrono-tz-a5f17ddb587d71c4\out/timezones.rs
+
+C:\Users\Lalo\JARVIS\tools\target\release\deps\libchrono_tz-28425d70630cbce1.rlib: C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\lib.rs C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\binary_search.rs C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\directory.rs C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\timezone_impl.rs C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\timezones.rs C:\Users\Lalo\JARVIS\tools\target\release\build\chrono-tz-a5f17ddb587d71c4\out/directory.rs C:\Users\Lalo\JARVIS\tools\target\release\build\chrono-tz-a5f17ddb587d71c4\out/timezones.rs
+
+C:\Users\Lalo\JARVIS\tools\target\release\deps\chrono_tz-28425d70630cbce1.d: C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\lib.rs C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\binary_search.rs C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\directory.rs C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\timezone_impl.rs C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\timezones.rs C:\Users\Lalo\JARVIS\tools\target\release\build\chrono-tz-a5f17ddb587d71c4\out/directory.rs C:\Users\Lalo\JARVIS\tools\target\release\build\chrono-tz-a5f17ddb587d71c4\out/timezones.rs
+
+C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\lib.rs:
+C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\binary_search.rs:
+C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\directory.rs:
+C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\timezone_impl.rs:
+C:\Users\Lalo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.8.6\src\timezones.rs:
+C:\Users\Lalo\JARVIS\tools\target\release\build\chrono-tz-a5f17ddb587d71c4\out/directory.rs:
+C:\Users\Lalo\JARVIS\tools\target\release\build\chrono-tz-a5f17ddb587d71c4\out/timezones.rs:
+
+# env-dep:OUT_DIR=C:\\Users\\Lalo\\JARVIS\\tools\\target\\release\\build\\chrono-tz-a5f17ddb587d71c4\\out

@@ -37,9 +37,8 @@ class Config:
     def llm_model(self) -> str:
         return self.get("llm.primary_model", "qwen3-vl")
 
-    @property
     def llm_fast_model(self) -> str:
-        return self.get("llm.fast_model", "qwen3:1.7b")
+        return self.get("llm.fast_model", "qwen3-vl")
 
     @property
     def tts_base_url(self) -> str:
@@ -87,7 +86,7 @@ class Config:
 
     @property
     def llm_backend(self) -> str:
-        return self.get("llm.backend", "gemini")
+        return self.get("llm.backend", "ollama")
 
     @property
     def gemini_model(self) -> str:

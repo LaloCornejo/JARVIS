@@ -1,13 +1,13 @@
 import asyncio
 import json
-import sys
 import os
+
+from core.llm import CopilotClient
+from tools import get_tool_registry
 
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
 print("1. importing...")
-from core.llm import CopilotClient
-from tools import get_tool_registry
 
 SYSTEM = "You are JARVIS. Use tools when needed. No emojis."
 
@@ -67,7 +67,8 @@ async def main():
         print(f"   executing {name}...")
         result = await tools.execute(name, **args)
         print(
-            f"   result: success={result.success}, data_len={len(str(result.data)) if result.data else 0}"
+            f"   result: success={result.success}, "
+            f"data_len={len(str(result.data)) if result.data else 0}"
         )
 
         tool_results.append(

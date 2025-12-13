@@ -138,10 +138,10 @@ class ModelRouter:
         ollama_client: OllamaClient,
         copilot_client: CopilotClient | None = None,
         gemini_client: GeminiClient | None = None,
-        ollama_model: str = "qwen3-vl",
+        ollama_model: str = "qwen3:1.7b",
         copilot_model: str = "claude-sonnet-4.5",
         gemini_model: str = "gemini-2.5-flash",
-        primary_backend: Literal["ollama", "gemini"] = "gemini",
+        primary_backend: Literal["ollama", "gemini"] = "ollama",
         use_copilot_for_complex: bool = True,
     ):
         self.ollama_client = ollama_client
@@ -155,9 +155,10 @@ class ModelRouter:
 
     def select_model(self, text: str, has_image: bool = False) -> ModelSelection:
         if has_image:
-            if self.gemini_client and self.primary_backend == "gemini":
+            if self.gemini_client:
                 return ModelSelection(backend="gemini", model=self.gemini_model)
-            return ModelSelection(backend="ollama", model=self.ollama_model)
+            # Use vision model for images
+            return ModelSelection(backend="ollama", model="qwen3-vl")
 
         complexity = classify_query(text)
 

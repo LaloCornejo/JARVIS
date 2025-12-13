@@ -1,0 +1,66 @@
+[package]
+name = "jarvis-tools"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["json"] }
+tokio = { version = "1.0", features = ["full"] }
+regex = "1.0"
+rand = "0.8"
+lazy_static = "1.4"
+glob = "0.3"
+winreg = "0.52"
+walkdir = "2.5"
+
+[[bin]]
+name = "get_time"
+path = "src/bin/get_time.rs"
+
+[[bin]]
+name = "read_file"
+path = "src/bin/read_file.rs"
+
+[[bin]]
+name = "write_file"
+path = "src/bin/write_file.rs"
+
+[[bin]]
+name = "list_directory"
+path = "src/bin/list_directory.rs"
+
+[[bin]]
+name = "search_files"
+path = "src/bin/search_files.rs"
+
+[[bin]]
+name = "file_info"
+path = "src/bin/file_info.rs"
+
+[[bin]]
+name = "run_command"
+path = "src/bin/run_command.rs"
+
+[[bin]]
+name = "execute_python"
+path = "src/bin/execute_python.rs"
+
+[[bin]]
+name = "web_search"
+path = "src/bin/web_search.rs"
+
+[[bin]]
+name = "fetch_url"
+path = "src/bin/fetch_url.rs"
+
+[[bin]]
+name = "discover_apps"
+path = "src/bin/discover_apps.rs"
+
+[lib]
+name = "jarvis_tools"
+path = "src/lib.rs"

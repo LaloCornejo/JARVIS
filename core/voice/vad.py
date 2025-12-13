@@ -25,14 +25,29 @@ class VoiceActivityDetector:
     def _load_model(self) -> None:
         import torch
 
-        model, utils = torch.hub.load(
-            repo_or_dir="snakers4/silero-vad",
-            model="silero_vad",
-            force_reload=False,
-            trust_repo=True,
-        )
-        self._model = model
-        self._get_speech_timestamps = utils[0]
+        try:
+            model, utils = torch.hub.load(
+                repo_or_dir="snakers4/silero-vad",
+                model="silero_vad",
+                force_reload=False,
+                trust_repo=True,
+            )
+            self._model = model
+            self._get_speech_timestamps = utils[0]
+        except Exception as e:
+            if "FFmpeg" in str(e):
+                # Fallback to loading without FFmpeg dependencies
+                model, utils = torch.hub.load(
+                    repo_or_dir="snakers4/silero-vad",
+                    model="silero_vad",
+                    force_reload=False,
+                    trust_repo=True,
+                    skip_validation=True,  # Skip validation that might require FFmpeg
+                )
+                self._model = model
+                self._get_speech_timestamps = utils[0]
+            else:
+                raise
 
     def _maybe_clear_cache(self) -> None:
         self._call_count += 1
@@ -81,3 +96,28 @@ class VoiceActivityDetector:
             )
             self._maybe_clear_cache()
             return [(ts["start"], ts["end"]) for ts in timestamps]
+
+    def health_check(self) -> bool:
+        with self._lock:
+            if self._model is None:
+                try:
+                    self._load_model()
+                except Exception as e:
+                    if "FFmpeg" in str(e):
+                        # Try alternative loading method
+                        try:
+                            import torch
+                            model, utils = torch.hub.load(
+                                repo_or_dir="snakers4/silero-vad",
+                                model="silero_vad",
+                                force_reload=False,
+                                trust_repo=True,
+                                skip_validation=True,
+                            )
+                            self._model = model
+                            self._get_speech_timestamps = utils[0]
+                        except Exception:
+                            return False
+                    else:
+                        return False
+            return self._model is not None

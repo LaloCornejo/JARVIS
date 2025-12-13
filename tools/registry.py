@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
+import platform
 from typing import Any
+
+import rich.logging
+from rich.console import Console
 
 from tools.base import BaseTool, ToolResult
 from tools.code import ExecutePythonTool, ExecuteShellTool
@@ -91,6 +98,15 @@ from tools.memory import (
     RecallMemoryTool,
     StoreMemoryTool,
 )
+from tools.high_perf_tools import (
+    HighPerfDataProcessorTool,
+    HighPerfFileAnalyzerTool,
+)
+from tools.rust_performance_tools import (
+    RustFileSearchTool,
+    RustLineCountTool,
+    RustDataExtractorTool,
+)
 from tools.system import (
     GetCurrentTimeTool,
     LaunchAppTool,
@@ -100,6 +116,8 @@ from tools.system import (
     SetTimerTool,
 )
 from tools.web import FetchUrlTool, WebSearchTool
+
+console = Console()
 
 TOOL_CATEGORIES = {
     "system": {
@@ -356,22 +374,68 @@ TOOL_CATEGORIES = {
             "viewing",
         ],
     },
+    "performance": {
+        "tools": [
+            "rust_file_search",
+            "rust_line_count",
+            "rust_data_extractor",
+            "high_perf_data_processor",
+            "parallel_file_analyzer",
+        ],
+        "keywords": [
+            "fast",
+            "quick",
+            "performance",
+            "speed",
+            "optimized",
+            "rust",
+            "search",
+            "find",
+            "scan",
+            "process",
+            "extract",
+            "count",
+            "parallel",
+            "data",
+            "analyze",
+        ],
+    },
 }
 
 CORE_TOOLS = ["get_current_time", "web_search", "run_command", "list_open_apps", "launch_app"]
 
+RUST_TOOLS = {
+    "get_current_time",
+    "run_command",
+    "execute_python",
+    "fetch_url",
+    "read_file",
+    "write_file",
+    "list_directory",
+    "search_files",
+    "file_info",
+}
+
 _registry_instance: ToolRegistry | None = None
 
 
-def get_tool_registry() -> ToolRegistry:
+def get_tool_registry(debug: bool = False) -> ToolRegistry:
     global _registry_instance
     if _registry_instance is None:
-        _registry_instance = ToolRegistry()
+        _registry_instance = ToolRegistry(debug=debug)
     return _registry_instance
 
 
 class ToolRegistry:
-    def __init__(self):
+    def __init__(self, debug: bool = False):
+        # Set up rich logging
+        log_level = logging.DEBUG if debug else logging.INFO
+        logging.basicConfig(
+            level=log_level,
+            format="%(message)s",
+            datefmt="[%X]",
+            handlers=[rich.logging.RichHandler(console=console, rich_tracebacks=True, markup=True)],
+        )
         self._tools: dict[str, BaseTool] = {}
         self._categories = TOOL_CATEGORIES
         self._register_defaults()
@@ -469,6 +533,11 @@ class ToolRegistry:
             ScreenshotListMonitorsTool(),
             ScreenshotListTool(),
             ScreenshotAnalyzeTool(),
+            RustFileSearchTool(),      # High-performance file search
+            RustLineCountTool(),       # High-performance line counting
+            RustDataExtractorTool(),   # High-performance data extraction
+            HighPerfDataProcessorTool(),   # Intelligent high-performance data processor
+            HighPerfFileAnalyzerTool(),    # Parallel file analyzer
         ]
         for tool in default_tools:
             self.register(tool)
@@ -484,6 +553,88 @@ class ToolRegistry:
 
     def get_schemas(self) -> list[dict]:
         return [tool.to_schema() for tool in self._tools.values()]
+
+    async def _execute_rust_tool(self, name: str, **kwargs: Any) -> ToolResult:
+        # Color mapping for rich markup
+        color_map = {
+            "web_search": "blue",
+            "fetch_url": "blue",
+            "read_file": "green",
+            "write_file": "green",
+            "list_directory": "green",
+            "search_files": "green",
+            "file_info": "green",
+            "get_current_time": "yellow",
+            "run_command": "red",
+            "execute_python": "red",
+        }
+        bg_color = color_map.get(name, "white")  # White default
+
+        logging.info(f"[{bg_color}]Starting Rust tool: {name} with args: {kwargs}[/{bg_color}]")
+        binary_map = {
+            "read_file": "read_file",
+            "write_file": "write_file",
+            "list_directory": "list_directory",
+            "search_files": "search_files",
+            "file_info": "file_info",
+            "get_current_time": "get_time",
+            "web_search": "web_search",
+            "run_command": "run_command",
+            "execute_python": "execute_python",
+            "fetch_url": "fetch_url",
+        }
+        binary = binary_map[name]
+        if platform.system() == "Windows":
+            binary += ".exe"
+        args = [f"./tools/target/release/{binary}"]
+        if name == "read_file":
+            args.extend([kwargs["path"], str(kwargs.get("max_lines", 1000))])
+        elif name == "write_file":
+            args.extend([kwargs["path"], kwargs["content"]])
+            append = "true" if kwargs.get("append", False) else "false"
+            args.append(append)
+        elif name == "list_directory":
+            args.append(kwargs["path"])
+            if "pattern" in kwargs:
+                args.append(kwargs["pattern"])
+        elif name == "search_files":
+            args.extend([kwargs["path"], kwargs["pattern"]])
+        elif name == "file_info":
+            args.append(kwargs["path"])
+        elif name == "get_current_time":
+            if "timezone" in kwargs:
+                args.append(kwargs["timezone"])
+        elif name == "web_search":
+            args.extend([kwargs["query"], str(kwargs.get("num_results", 10))])
+        elif name == "run_command":
+            args.extend([kwargs["command"], str(kwargs.get("timeout", 30))])
+        elif name == "execute_python":
+            args.extend([kwargs["code"], str(kwargs.get("timeout", 30))])
+        elif name == "fetch_url":
+            args.append(kwargs["url"])
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                logging.error(
+                    f"[{bg_color}]Rust tool {name} failed: {stderr.decode()}[/{bg_color}]"
+                )
+                return ToolResult(success=False, data=None, error=stderr.decode())
+            data = json.loads(stdout.decode())
+            logging.info(
+                f"[{bg_color}]Rust tool {name} success: "
+                f"exit_code={data['exit_code']}, stdout_len={len(data['stdout'])}[/{bg_color}]"
+            )
+            return ToolResult(
+                success=data["exit_code"] == 0, data=data["stdout"], error=data["stderr"]
+            )
+        except Exception as e:
+            logging.error(f"[{bg_color}]Rust tool {name} exception: {str(e)}[/{bg_color}]")
+            return ToolResult(success=False, data=None, error=str(e))
 
     def get_filtered_schemas(self, query: str, max_tools: int = 25) -> list[dict]:
         query_lower = query.lower()
@@ -520,7 +671,13 @@ class ToolRegistry:
         return schemas
 
     async def execute(self, name: str, **kwargs: Any) -> ToolResult:
+        if name in RUST_TOOLS:
+            return await self._execute_rust_tool(name, **kwargs)
         tool = self.get(name)
         if not tool:
+            logging.error(f"Tool '{name}' not found")
             return ToolResult(success=False, data=None, error=f"Tool '{name}' not found")
-        return await tool.execute(**kwargs)
+        logging.info(f"Executing Python tool: {name} with args: {kwargs}")
+        result = await tool.execute(**kwargs)
+        logging.info(f"Python tool {name} result: success={result.success}")
+        return result

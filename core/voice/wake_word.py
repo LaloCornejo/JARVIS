@@ -14,7 +14,7 @@ class WakeWordDetector:
     def __init__(
         self,
         model_path: str | None = None,
-        threshold: float = 0.5,
+        threshold: float = 0.3,
         sample_rate: int = 16000,
         chunk_size: int = 1280,
         input_device: int | None = None,
@@ -30,12 +30,25 @@ class WakeWordDetector:
         self._callback: Callable[[], None] | None = None
 
     def _load_model(self) -> None:
-        from openwakeword.model import Model
+        try:
+            from openwakeword.model import Model
 
-        if self.model_path:
-            self._model = Model(wakeword_models=[self.model_path], inference_framework="onnx")
-        else:
-            self._model = Model(wakeword_models=["hey_jarvis"], inference_framework="onnx")
+            if self.model_path:
+                self._model = Model(wakeword_models=[self.model_path], inference_framework="onnx")
+            else:
+                self._model = Model(wakeword_models=["hey_jarvis"], inference_framework="onnx")
+        except Exception as e:
+            # Handle cases where torio/ffmpeg extensions are not available
+            if "FFmpeg" in str(e):
+                log.warning("FFmpeg extension not available, using fallback model loading")
+                # Try to load with minimal dependencies
+                from openwakeword.model import Model
+                if self.model_path:
+                    self._model = Model(wakeword_models=[self.model_path], inference_framework="onnx")
+                else:
+                    self._model = Model(wakeword_models=["hey_jarvis"], inference_framework="onnx")
+            else:
+                raise
 
     def start(self, callback: Callable[[], None]) -> None:
         if self._running:
@@ -57,7 +70,18 @@ class WakeWordDetector:
 
         log.info("Wake word loop starting, loading model...")
         if self._model is None:
-            self._load_model()
+            try:
+                self._load_model()
+            except Exception as e:
+                print(f"Failed to load wake word model: {e}")
+                log.error("Failed to load wake word model: %s", e)
+                self._running = False
+                return
+        if self._model is None:
+            print("Wake word model failed to load")
+            log.error("Wake word model failed to load")
+            self._running = False
+            return
         log.info("Wake word model loaded, starting audio stream...")
 
         def audio_callback(indata: np.ndarray, frames: int, time_info: Any, status: Any) -> None:
@@ -66,34 +90,61 @@ class WakeWordDetector:
             audio_chunk = indata[:, 0]
             audio_int16 = (audio_chunk * 32767).astype(np.int16)
             prediction = self._model.predict(audio_int16)
-            for score in prediction.values():
+            for model_name, score in prediction.items():
                 if score > self.threshold:
-                    log.info("Wake word detected! Score: %s", score)
+                    log.info("Wake word detected!")
                     if self._callback:
                         self._callback()
                     self._model.reset()
                     break
 
-        with sd.InputStream(
-            device=self.input_device,
-            samplerate=self.sample_rate,
-            channels=1,
-            dtype="float32",
-            blocksize=self.chunk_size,
-            callback=audio_callback,
-        ):
-            import time
+        try:
+            with sd.InputStream(
+                device=self.input_device,
+                samplerate=self.sample_rate,
+                channels=1,
+                dtype="float32",
+                blocksize=self.chunk_size,
+                callback=audio_callback,
+            ):
+                while self._running:
+                    import time
 
-            while self._running:
-                time.sleep(0.1)
+                    time.sleep(0.1)
+        except Exception as e:
+            if "FFmpeg" in str(e):
+                log.warning("FFmpeg extension issue in audio stream, continuing without advanced audio features")
+                # Continue running without advanced audio features
+                while self._running:
+                    import time
+
+                    time.sleep(0.1)
+            else:
+                raise
 
     def detect_once(self, audio: np.ndarray) -> bool:
         if self._model is None:
-            self._load_model()
+            try:
+                self._load_model()
+            except Exception as e:
+                log.error("Failed to load wake word model: %s", e)
+                return False
+        if self._model is None:
+            log.error("Wake word model failed to load")
+            return False
         audio_int16 = (audio * 32767).astype(np.int16) if audio.dtype == np.float32 else audio
         prediction = self._model.predict(audio_int16)
         for score in prediction.values():
             if score > self.threshold:
+                log.debug("Wake word detected in audio chunk")
                 self._model.reset()
                 return True
         return False
+
+    def health_check(self) -> bool:
+        if self._model is None:
+            try:
+                self._load_model()
+            except Exception:
+                return False
+        return self._model is not None

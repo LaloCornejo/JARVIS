@@ -76,6 +76,7 @@ class OllamaClient:
         images: list[str] | None = None,
         stream: bool = True,
         temperature: float = 0.7,
+        num_predict: int | None = None,
     ) -> AsyncIterator[str]:
         client = await self._get_client()
         actual_prompt = prompt
@@ -90,6 +91,8 @@ class OllamaClient:
                 "num_ctx": self.num_ctx,
             },
         }
+        if num_predict is not None:
+            payload["options"]["num_predict"] = num_predict
         if system:
             payload["system"] = system
         if images:
@@ -128,6 +131,9 @@ class OllamaClient:
                 "num_ctx": self.num_ctx,
             },
         }
+        if self._should_disable_thinking():
+            payload["options"]["thinking"] = False
+            payload["options"]["temperature"] = 0.1
         if self._should_disable_thinking() and messages:
             last_msg = messages[-1]
             if last_msg.get("role") == "user":
@@ -177,9 +183,12 @@ class OllamaClient:
         return response.json().get("models", [])
 
     async def health_check(self) -> bool:
+        """Check if the Ollama service is available."""
         try:
             client = await self._get_client()
-            response = await client.get(f"{self.base_url}/api/tags")
+            # Use full URL instead of relative path
+            response = await client.get(f"{self.base_url}/api/tags", timeout=5.0)
             return response.status_code == 200
-        except Exception:
+        except Exception as e:
+            print(f"Health check error: {e}")
             return False

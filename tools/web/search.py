@@ -22,25 +22,22 @@ class WebSearchTool(BaseTool):
     }
 
     async def execute(self, query: str, num_results: int = 5) -> ToolResult:
-        try:
-            from duckduckgo_search import DDGS
+        from duckduckgo_search import DDGS
 
+        try:
             num_results = min(max(1, num_results), 10)
 
             with DDGS() as ddgs:
                 results = list(ddgs.text(query, max_results=num_results))
-
-            formatted = []
-            for r in results:
-                formatted.append(
+                formatted_results = [
                     {
-                        "title": r.get("title", ""),
-                        "url": r.get("href", ""),
-                        "snippet": r.get("body", ""),
+                        "title": r["title"],
+                        "url": r["href"],
+                        "snippet": r["body"],
                     }
-                )
-
-            return ToolResult(success=True, data=formatted)
+                    for r in results
+                ]
+            return ToolResult(success=True, data=formatted_results)
         except Exception as e:
             return ToolResult(success=False, data=None, error=str(e))
 
@@ -60,16 +57,27 @@ class FetchUrlTool(BaseTool):
     }
 
     async def execute(self, url: str) -> ToolResult:
-        try:
-            import httpx
+        import json
+        import os
+        import subprocess
 
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                content = response.text[:10000]
+        try:
+            binary_path = os.path.join(
+                os.path.dirname(__file__), "..", "target", "debug", "fetch_url.exe"
+            )
+            result = subprocess.run([binary_path, url], capture_output=True, text=True, timeout=35)
+
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
                 return ToolResult(
                     success=True,
-                    data={"url": url, "status": response.status_code, "content": content},
+                    data={
+                        "url": data["url"],
+                        "status": data["status"],
+                        "content": data["content"],
+                    },
                 )
+            else:
+                return ToolResult(success=False, data=None, error=result.stderr)
         except Exception as e:
             return ToolResult(success=False, data=None, error=str(e))

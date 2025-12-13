@@ -3,15 +3,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import datetime
+import hashlib
+import io
 import os
 from pathlib import Path
 from typing import Any
 
-from core.llm import get_vision_client
+from core.llm import get_vision_client, get_fast_client
 from tools.base import BaseTool, ToolResult
 
 try:
-    from PIL import ImageGrab
+    from PIL import Image, ImageEnhance, ImageFilter, ImageGrab
 
     HAS_PIL = True
 except ImportError:
@@ -36,6 +38,8 @@ class ScreenshotManager:
             )
         )
         self.save_dir.mkdir(parents=True, exist_ok=True)
+        self._analysis_cache: dict[str, dict] = {}  # Cache for screenshot analyses
+        self._cache_ttl = 60  # Cache TTL in seconds
 
     def _capture_screen_sync(
         self,
@@ -190,13 +194,70 @@ class ScreenshotManager:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._get_monitors_info_sync)
 
-    def get_base64_image(self, path: str) -> str | None:
+    def get_base64_image(self, path: str, max_size: tuple[int, int] = (1024, 1024)) -> str | None:
         try:
-            with open(path, "rb") as f:
-                return base64.b64encode(f.read()).decode("utf-8")
+            if not HAS_PIL:
+                with open(path, "rb") as f:
+                    return base64.b64encode(f.read()).decode("utf-8")
+            
+            # Open and resize image to reduce processing time
+            img = Image.open(path)
+            img.thumbnail(max_size, Image.Resampling.LANCZOS)
+            
+            # Convert to RGB if necessary (for PNG with transparency)
+            if img.mode in ("RGBA", "LA", "P"):
+                img = img.convert("RGB")
+            
+            # Apply preprocessing to improve text readability for vision model
+            from PIL import ImageEnhance, ImageFilter
+            # Enhance sharpness more aggressively for better text clarity
+            enhancer = ImageEnhance.Sharpness(img)
+            img = enhancer.enhance(1.3)
+            # Increase contrast to make text stand out better
+            enhancer = ImageEnhance.Contrast(img)
+            img = enhancer.enhance(1.1)
+            # Slight brightness adjustment if needed
+            enhancer = ImageEnhance.Brightness(img)
+            img = enhancer.enhance(1.05)
+            
+            # Unsharp mask for even better text clarity
+            img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=50, threshold=0))
+            
+            # Save to bytes with balanced quality
+            buffered = io.BytesIO()
+            img.save(buffered, format="JPEG", quality=75, optimize=True)
+            return base64.b64encode(buffered.getvalue()).decode("utf-8")
         except Exception:
             return None
 
+    def _get_cache_key(self, path: str, question: str) -> str:
+        """Generate a cache key based on file path and question."""
+        return hashlib.md5(f"{path}:{question}".encode()).hexdigest()
+    
+    def _is_cache_valid(self, timestamp: float) -> bool:
+        """Check if cache entry is still valid."""
+        return (datetime.datetime.now().timestamp() - timestamp) < self._cache_ttl
+    
+    def get_cached_analysis(self, path: str, question: str) -> dict | None:
+        """Get cached analysis if available and valid."""
+        cache_key = self._get_cache_key(path, question)
+        if cache_key in self._analysis_cache:
+            entry = self._analysis_cache[cache_key]
+            if self._is_cache_valid(entry["timestamp"]):
+                return entry["data"]
+            else:
+                # Remove expired entry
+                del self._analysis_cache[cache_key]
+        return None
+    
+    def cache_analysis(self, path: str, question: str, data: dict) -> None:
+        """Cache analysis result."""
+        cache_key = self._get_cache_key(path, question)
+        self._analysis_cache[cache_key] = {
+            "data": data,
+            "timestamp": datetime.datetime.now().timestamp()
+        }
+    
     def list_screenshots(self, limit: int = 20) -> list[dict[str, Any]]:
         screenshots = []
         for f in sorted(self.save_dir.glob("*.png"), key=os.path.getmtime, reverse=True)[:limit]:
@@ -361,16 +422,22 @@ class ScreenshotAnalyzeTool(BaseTool):
 
     async def execute(
         self,
-        question: str = "Describe what is shown on the screen in detail.",
+        question: str = "What's in this screenshot? Brief answer in 1 sentence.",
         monitor: int = 0,
     ) -> ToolResult:
         manager = get_screenshot_manager()
         try:
+            # Check cache first
             success, path, error = await manager.capture_screen(monitor=monitor)
             if not success:
                 return ToolResult(success=False, data=None, error=error)
-
-            b64 = manager.get_base64_image(path)
+            
+            # Check if we have a cached result
+            cached_result = manager.get_cached_analysis(path, question)
+            if cached_result:
+                return ToolResult(success=True, data=cached_result)
+            
+            b64 = manager.get_base64_image(path, max_size=(640, 480))
             if not b64:
                 return ToolResult(success=False, data=None, error="Failed to read screenshot")
 
@@ -383,21 +450,72 @@ class ScreenshotAnalyzeTool(BaseTool):
                     error="Ollama not available. Ensure Ollama is running with qwen3-vl model.",
                 )
 
+            # Stream response progressively for better perceived performance
+            analysis_chunks = []
             analysis_text = ""
-            async for chunk in vision.generate(
-                prompt=question,
-                images=[b64],
-                stream=True,
-                temperature=0.3,
-            ):
-                analysis_text += chunk
+            chunk_count = 0
+            
+            try:
+                async with asyncio.timeout(40):  # 40 second timeout for larger images
+                    async for chunk in vision.generate(
+                        prompt=question,
+                        images=[b64],
+                        stream=True,
+                        temperature=0.7,  # Known working temperature
+                        num_predict=320,  # Increased for more detailed responses
+                    ):
+                        analysis_text += chunk
+                        analysis_chunks.append(chunk)
+                        chunk_count += 1
+                        
+                        # Early termination if we have enough content and it ends with punctuation
+                        if chunk_count > 5 and len(analysis_text) > 100 and analysis_text.strip()[-1] in '.!?':
+                            break
+                            
+            except asyncio.TimeoutError:
+                # Even with timeout, return partial results if we have any
+                if analysis_text:
+                    pass  # Continue with partial results
+                else:
+                    return ToolResult(
+                        success=False,
+                        data=None,
+                        error="Vision analysis timed out after 40 seconds. The image may be complex or the model busy. Try again in a moment.",
+                    )
+            except Exception as e:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"Vision analysis failed: {str(e)}",
+                )
 
-            return ToolResult(
-                success=True,
-                data={
-                    "analysis": analysis_text,
-                    "screenshot_path": path,
-                },
-            )
+            # If we got no meaningful result, try a simpler approach
+            if not analysis_text.strip():
+                # Try a simpler, faster question
+                simple_question = "What's in this image? Very brief."
+                analysis_text = ""
+                try:
+                    async with asyncio.timeout(20):
+                        async for chunk in vision.generate(
+                            prompt=simple_question,
+                            images=[b64],
+                            stream=True,
+                            temperature=0.8,  # Higher temp for faster response
+                            num_predict=128,  # Shorter output
+                        ):
+                            analysis_text += chunk
+                except:
+                    pass  # If this fails too, we'll return what we have
+
+            result_data = {
+                "analysis": analysis_text.strip() if analysis_text else "Unable to analyze screenshot.",
+                "screenshot_path": path,
+                "chunks_received": chunk_count,
+            }
+            
+            # Cache the result
+            manager.cache_analysis(path, question, result_data)
+            
+            return ToolResult(success=True, data=result_data)
         except Exception as e:
             return ToolResult(success=False, data=None, error=str(e))

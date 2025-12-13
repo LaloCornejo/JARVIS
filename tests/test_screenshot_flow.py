@@ -5,14 +5,14 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from dotenv import load_dotenv
-
-load_dotenv()
 
 from core.llm import CopilotClient
 from tools import get_tool_registry
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+load_dotenv()
 
 SYSTEM_PROMPT = """You are JARVIS, an intelligent AI assistant. \
 You are helpful, concise, and friendly.
@@ -43,13 +43,15 @@ async def test_full_flow():
                 full_response += content
             if calls := msg.get("tool_calls"):
                 print(
-                    f"[FIRST PASS] Got tool calls: {[c.get('function', {}).get('name') for c in calls]}"
+                    f"[FIRST PASS] Got tool calls: "
+                    f"{[c.get('function', {}).get('name') for c in calls]}"
                 )
                 tool_calls.extend(calls)
 
-    print(f"\n=== First pass complete ===")
+    print("\n=== First pass complete ===")
     print(
-        f"Chunks: {chunk_count}, Response: {len(full_response)} chars, Tool calls: {len(tool_calls)}"
+        f"Chunks: {chunk_count}, Response: {len(full_response)} chars, "
+        f"Tool calls: {len(tool_calls)}"
     )
     print(f"Response text: {full_response}")
 
@@ -72,7 +74,8 @@ async def test_full_flow():
         print(f"Executing tool: {name} with args: {args}")
         result = await tools.execute(name, **args)
         print(
-            f"Tool {name} result: success={result.success}, data_len={len(str(result.data)) if result.data else 0}"
+            f"Tool {name} result: success={result.success}, "
+            f"data_len={len(str(result.data)) if result.data else 0}"
         )
         if result.data:
             preview = str(result.data)[:500]
@@ -99,7 +102,7 @@ async def test_full_flow():
                 )
                 full_response += content
 
-    print(f"\n=== Second pass complete ===")
+    print("\n=== Second pass complete ===")
     print(f"Chunks: {chunk_count}, Response: {len(full_response)} chars")
     print(f"\nFinal response:\n{full_response}")
 

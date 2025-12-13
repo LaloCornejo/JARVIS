@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import platform
 import subprocess
 import webbrowser
+from pathlib import Path
 
 from tools.base import BaseTool, ToolResult
 
@@ -58,7 +61,33 @@ APP_REGISTRY = {
 }
 
 
+def load_discovered_apps():
+    """Load discovered apps from the Rust tool's cache"""
+    cache_file = Path(__file__).parent.parent / "app_registry_cache.json"
+    if cache_file.exists():
+        try:
+            with open(cache_file, "r") as f:
+                data = json.load(f)
+                # The apps are in the "apps" array
+                discovered_apps = data.get("apps", [])
+                # Convert to the format expected by APP_REGISTRY
+                for app_data in discovered_apps:
+                    app_name = app_data["name"]
+                    # Use the exe_name as the key, but create a friendly name
+                    exe_name = app_data["exe_name"]
+                    if exe_name not in APP_REGISTRY:
+                        APP_REGISTRY[exe_name] = {
+                            "exe": app_data["exe_path"],
+                            "aliases": [app_name.lower(), app_name.lower() + " app"] + app_data.get("aliases", [])
+                        }
+        except Exception as e:
+            print(f"Error loading discovered apps: {e}")
+
+
 def find_app(query: str) -> tuple[str, str] | None:
+    # Load discovered apps if available
+    load_discovered_apps()
+    
     query_lower = query.lower().strip()
 
     if query_lower in APP_REGISTRY:
@@ -81,6 +110,106 @@ def find_app(query: str) -> tuple[str, str] | None:
                 return name, info["exe"]
 
     return None
+
+
+class RefreshAppRegistryTool(BaseTool):
+    name = "refresh_app_registry"
+    description = "Refresh the application registry by scanning for installed apps"
+    parameters = {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    }
+
+    async def execute(self) -> ToolResult:
+        try:
+            # Run the Rust discovery tool
+            tools_dir = Path(__file__).parent.parent
+            discovery_exe = tools_dir / "target" / "release" / "discover_apps.exe"
+            
+            if not discovery_exe.exists():
+                return ToolResult(
+                    success=False, 
+                    data=None, 
+                    error="Discovery tool not found. Please build it first with 'cargo build --release'"
+                )
+            
+            process = subprocess.run(
+                [str(discovery_exe)],
+                cwd=tools_dir,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if process.returncode == 0:
+                # Reload the app registry
+                global APP_REGISTRY
+                APP_REGISTRY = {
+                    "zen": {"exe": "zen", "aliases": ["zen browser", "zen-browser"]},
+                    "chrome": {"exe": "chrome", "aliases": ["google chrome", "google-chrome"]},
+                    "firefox": {"exe": "firefox", "aliases": ["mozilla firefox"]},
+                    "edge": {"exe": "msedge", "aliases": ["microsoft edge"]},
+                    "brave": {"exe": "brave", "aliases": ["brave browser"]},
+                    "code": {"exe": "code", "aliases": ["vscode", "visual studio code", "vs code"]},
+                    "cursor": {"exe": "cursor", "aliases": ["cursor editor", "cursor ide"]},
+                    "notepad": {"exe": "notepad", "aliases": ["notepad.exe"]},
+                    "notepad++": {"exe": "notepad++", "aliases": ["notepadplusplus", "npp"]},
+                    "terminal": {"exe": "wt", "aliases": ["windows terminal", "wt", "cmd", "command prompt"]},
+                    "powershell": {"exe": "powershell", "aliases": ["ps", "posh"]},
+                    "explorer": {"exe": "explorer", "aliases": ["file explorer", "files", "windows explorer"]},
+                    "calculator": {"exe": "calc", "aliases": ["calc", "calculadora"]},
+                    "spotify": {"exe": "spotify", "aliases": ["spotify music"]},
+                    "discord": {"exe": "discord", "aliases": ["discord app"]},
+                    "slack": {"exe": "slack", "aliases": ["slack app"]},
+                    "teams": {"exe": "ms-teams", "aliases": ["microsoft teams", "ms teams"]},
+                    "zoom": {"exe": "zoom", "aliases": ["zoom meeting", "zoom app"]},
+                    "obs": {"exe": "obs64", "aliases": ["obs studio", "obs64"]},
+                    "vlc": {"exe": "vlc", "aliases": ["vlc player", "vlc media player"]},
+                    "steam": {"exe": "steam", "aliases": ["steam app"]},
+                    "epic": {
+                        "exe": "EpicGamesLauncher",
+                        "aliases": ["epic games", "epic launcher", "epic games launcher"],
+                    },
+                    "word": {"exe": "winword", "aliases": ["microsoft word", "ms word"]},
+                    "excel": {"exe": "excel", "aliases": ["microsoft excel", "ms excel"]},
+                    "powerpoint": {"exe": "powerpnt", "aliases": ["microsoft powerpoint", "ms powerpoint", "ppt"]},
+                    "outlook": {"exe": "outlook", "aliases": ["microsoft outlook", "ms outlook"]},
+                    "onenote": {"exe": "onenote", "aliases": ["microsoft onenote", "ms onenote"]},
+                    "photoshop": {"exe": "photoshop", "aliases": ["adobe photoshop", "ps"]},
+                    "premiere": {"exe": "premiere", "aliases": ["adobe premiere", "premiere pro"]},
+                    "aftereffects": {"exe": "afterfx", "aliases": ["adobe after effects", "after effects", "ae"]},
+                    "illustrator": {"exe": "illustrator", "aliases": ["adobe illustrator", "ai"]},
+                    "figma": {"exe": "figma", "aliases": ["figma app"]},
+                    "postman": {"exe": "postman", "aliases": ["postman app"]},
+                    "docker": {"exe": "docker", "aliases": ["docker desktop"]},
+                    "gimp": {"exe": "gimp", "aliases": ["gimp editor"]},
+                    "blender": {"exe": "blender", "aliases": ["blender 3d"]},
+                    "unity": {"exe": "unity", "aliases": ["unity hub", "unity editor"]},
+                    "unreal": {"exe": "UnrealEditor", "aliases": ["unreal engine", "unreal editor"]},
+                    "notion": {"exe": "notion", "aliases": ["notion app"]},
+                    "obsidian": {"exe": "obsidian", "aliases": ["obsidian app", "obsidian notes"]},
+                    "todoist": {"exe": "todoist", "aliases": ["todoist app"]},
+                    "whatsapp": {"exe": "whatsapp", "aliases": ["whatsapp desktop", "whatsapp app"]},
+                    "telegram": {"exe": "telegram", "aliases": ["telegram desktop", "telegram app"]},
+                    "signal": {"exe": "signal", "aliases": ["signal app", "signal desktop"]},
+                }
+                
+                # Load the newly discovered apps
+                load_discovered_apps()
+                
+                return ToolResult(
+                    success=True,
+                    data={"message": "App registry refreshed successfully", "apps_count": len(APP_REGISTRY)}
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"Discovery tool failed: {process.stderr}"
+                )
+        except Exception as e:
+            return ToolResult(success=False, data=None, error=str(e))
 
 
 class ListOpenAppsTool(BaseTool):

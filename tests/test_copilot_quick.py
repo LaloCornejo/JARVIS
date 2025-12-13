@@ -1,10 +1,11 @@
 import asyncio
 import sys
 
+from core.llm import CopilotClient
+
 sys.stdout.reconfigure(line_buffering=True)
 
 print("1. importing...")
-from core.llm import CopilotClient
 
 print("2. creating client...")
 client = CopilotClient(model="claude-sonnet-4.5")

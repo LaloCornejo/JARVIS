@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from tools.base import BaseTool, ToolResult
 
@@ -22,17 +23,18 @@ class GetCurrentTimeTool(BaseTool):
 
     async def execute(self, timezone: str | None = None) -> ToolResult:
         try:
-            tz = ZoneInfo(timezone or "America/Mexico_City")
-            now = datetime.now(tz)
-
-            result = {
-                "datetime": now.isoformat(),
-                "date": now.strftime("%Y-%m-%d"),
-                "time": now.strftime("%H:%M:%S"),
-                "day_of_week": now.strftime("%A"),
-                "timezone": timezone or "America/Mexico_City",
-            }
-            return ToolResult(success=True, data=result)
+            cmd = ["get_time"]
+            if timezone:
+                cmd.extend(["--timezone", timezone])
+            else:
+                cmd.extend(["--timezone", "America/Mexico_City"])
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            data = json.loads(result.stdout.strip())
+            return ToolResult(success=True, data=data)
+        except subprocess.CalledProcessError as e:
+            return ToolResult(success=False, data=None, error=f"Binary failed: {e.stderr}")
+        except json.JSONDecodeError as e:
+            return ToolResult(success=False, data=None, error=f"Invalid JSON: {e}")
         except Exception as e:
             return ToolResult(success=False, data=None, error=str(e))
 

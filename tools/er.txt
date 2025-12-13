@@ -1,0 +1,19 @@
+
+╭─[Lalo@Lalo-OvO]  …\JARVIS\tools                              [ main] [Thu - 13:09]
+╰─󰊠󰊠󰊠  : cargo test
+   Compiling jarvis-tools v0.1.0 (C:\Users\Lalo\JARVIS\tools)
+error: unexpected closing delimiter: `}`
+   --> src\lib.rs:206:1
+    |
+188 |     async fn test_execute_python_blocked() {
+    |                                            - this opening brace...
+...
+192 |     }
+    |     - ...matches this closing brace
+...
+206 | }
+    | ^ unexpected closing delimiter
+
+error: could not compile `jarvis-tools` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `jarvis-tools` (lib) due to 1 previous error

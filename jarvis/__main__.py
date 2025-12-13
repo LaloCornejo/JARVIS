@@ -33,14 +33,17 @@ from core.config import Config
 from core.llm import CopilotClient, GeminiClient, OllamaClient
 from core.llm.router import ModelRouter
 from core.voice.tts import TextToSpeech
-from tools import ToolRegistry, get_tool_registry
+from core.streaming_interface import streaming_interface, conversation_buffer
+from tools import get_tool_registry
 
 log = logging.getLogger("jarvis")
 
 SYSTEM_PROMPT = """You are JARVIS, an intelligent AI assistant. \
 You are helpful, concise, and friendly.
-You have access to many tools that you can use to help the user. When you need to perform actions \
-or get information, use the appropriate tool. Always be direct and avoid unnecessary verbosity.
+You have access to many tools that you can use to help the user. Always use tools for
+information retrieval, time queries, web searches, and any external data. When you need
+to perform actions or get information, use the appropriate tool. Always be direct and
+avoid unnecessary verbosity.
 IMPORTANT: Never use emojis in your responses.
 """
 
@@ -106,7 +109,7 @@ class SystemStatus(Static):
             "TTS": False,
             "Voice": False,
         }
-        self.model = "claude-sonnet-4.5"
+        self.model = "auto"
         self.voice_state = "Idle"
 
     def update_service(self, name: str, status: bool) -> None:
@@ -247,12 +250,16 @@ class StreamingBubble(Static):
         self.refresh()
 
     def append_text(self, chunk: str) -> None:
-        self.text_content += chunk
-        self.refresh()
+        """Append text to the streaming bubble safely."""
+        # Use call_later to ensure UI updates happen on the main thread
+        self.call_later(lambda: setattr(self, 'text_content', self.text_content + chunk))
+        self.call_later(self.refresh)
 
     def finish(self) -> None:
-        self._done = True
-        self.refresh()
+        """Mark the streaming bubble as finished."""
+        # Use call_later to ensure UI updates happen on the main thread
+        self.call_later(lambda: setattr(self, '_done', True))
+        self.call_later(self.refresh)
 
     def render(self) -> Text:
         text = Text()
@@ -301,6 +308,7 @@ COMMANDS = [
     ("clear", "Clear conversation history"),
     ("model", "Select AI model"),
     ("voice", "Toggle voice input/output"),
+    ("restart", "Restart voice system"),
     ("login", "Authenticate with GitHub Copilot"),
     ("help", "Show available commands"),
     ("quit", "Exit JARVIS"),
@@ -564,6 +572,7 @@ class JarvisApp(App):
             gemini_client=self.gemini,
             primary_backend=self.config.llm_backend,
             gemini_model=self.config.gemini_model,
+            ollama_model=self.config.llm_fast_model(),
         )
         self.tts = TextToSpeech(
             base_url=self.config.tts_base_url,
@@ -577,8 +586,8 @@ class JarvisApp(App):
         self._max_messages = 50
         self._voice_task: asyncio.Task | None = None
         self._selected_model: tuple[str, str] | None = (
-            "copilot:claude-sonnet-4.5",
-            "COPILOT CLAUDE SONNET 4.5",
+            "auto",
+            "AUTO - Smart Selection",
         )
         self._available_models: list[tuple[str, str]] = []
         self._models_loaded = False
@@ -605,8 +614,20 @@ class JarvisApp(App):
 
     async def on_mount(self) -> None:
         self.title = "J.A.R.V.I.S"
+        # Initialize streaming interface
+        await streaming_interface.initialize_streams()
         self.check_services()
-        self.init_voice()
+        await self.init_voice()
+        # Handle piped input for testing
+        if not sys.stdin.isatty():
+            try:
+                piped_input = sys.stdin.read().strip()
+                if piped_input:
+                    log.warning(f"[TUI] Processing piped input: {piped_input}")
+                    self.add_message(piped_input, "user")
+                    self.process_message(piped_input)
+            except Exception as e:
+                log.error(f"Failed to read piped input: {e}")
 
     @work(exclusive=False, exit_on_error=False)
     async def check_services(self) -> None:
@@ -690,7 +711,36 @@ class JarvisApp(App):
         self._models_loaded = True
 
     @work(exclusive=False)
+    async def _stream_conversation_updates(self) -> None:
+        """Stream conversation updates to the UI"""
+        try:
+            async for update in streaming_interface.get_conversation_updates():
+                if "role" in update and "content" in update:
+                    # Use call_later to ensure UI updates happen on the main thread
+                    self.call_later(lambda content=update["content"], role=update["role"]: 
+                                  self.add_message(content, role))
+        except Exception as e:
+            log.error("Conversation streaming error: %s", e)
+
+    async def _stream_transcription_updates(self) -> None:
+        """Stream partial transcription updates to the UI"""
+        try:
+            async for text in streaming_interface.get_transcription_updates():
+                # Update the thinking line with partial transcription
+                def update_thinking(text=text):
+                    try:
+                        thinking = self.query_one("#thinking-line", Static)
+                        thinking.update(f"Hearing: {text}...")
+                    except Exception:
+                        pass
+                
+                # Use call_later to ensure UI updates happen on the main thread
+                self.call_later(update_thinking)
+        except Exception as e:
+            log.error("Transcription streaming error: %s", e)
+
     async def init_voice(self) -> None:
+        log.info("Initializing voice")
         try:
             self.voice_assistant = VoiceAssistant(
                 debug=self._debug_mode,
@@ -718,6 +768,11 @@ class JarvisApp(App):
             self.voice_assistant.on_response(on_response)
             status.update_service("voice", True)
             self._voice_task = asyncio.create_task(self.voice_assistant.run())
+            
+            # Start streaming tasks
+            asyncio.create_task(self._stream_conversation_updates())
+            asyncio.create_task(self._stream_transcription_updates())
+            
             self.show_notification("Voice system online", "success")
         except Exception as e:
             log.error("Voice init failed: %s", e)
@@ -746,20 +801,35 @@ class JarvisApp(App):
             core.set_status("ONLINE")
 
     def on_voice_transcription(self, event: VoiceTranscription) -> None:
-        thinking = self.query_one("#thinking-line", Static)
-        if event.partial:
-            thinking.update(f"Hearing: {event.text}...")
-        else:
-            thinking.update("")
-            self.add_message(event.text, "user")
-
-    def on_voice_response(self, event: VoiceResponse) -> None:
-        self.add_message(event.text, "assistant")
+        """Handle voice transcription events."""
+        def update_thinking_line():
+            thinking = self.query_one("#thinking-line", Static)
+            if event.partial:
+                thinking.update(f"Hearing: {event.text}...")
+            else:
+                thinking.update("")
+                # Add finalized transcription to chat
+                if event.text:
+                    self.add_message(event.text, "user")
+        
+        # Use call_later to ensure UI updates happen on the main thread
+        self.call_later(update_thinking_line)
 
     def add_message(self, content: str, role: str) -> None:
-        chat = self.query_one("#chat-scroll", VerticalScroll)
-        chat.mount(MessageBubble(content, role))
-        chat.scroll_end()
+        """Add a message to the chat display safely."""
+        try:
+            chat = self.query_one("#chat-scroll", VerticalScroll)
+            # Use call_later to ensure UI updates happen on the main thread
+            self.call_later(lambda: chat.mount(MessageBubble(content, role)))
+            self.call_later(lambda: chat.scroll_end())
+        except Exception as e:
+            log.error(f"Error adding message: {e}")
+
+    def on_voice_response(self, event: VoiceResponse) -> None:
+        """Handle voice response events."""
+        # Add voice assistant responses to the chat display
+        # Use call_later to ensure UI updates happen on the main thread
+        self.call_later(lambda: self.add_message(event.text, "assistant"))
 
     def on_input_changed(self, event: Input.Changed) -> None:
         palette = self.query_one("#command-palette", CommandPalette)
@@ -808,7 +878,6 @@ class JarvisApp(App):
         if text.startswith("/"):
             await self.handle_command(text)
         else:
-            self.add_message(text, "user")
             self.process_message(text)
 
     async def handle_command(self, cmd: str) -> None:
@@ -830,8 +899,10 @@ class JarvisApp(App):
             self.action_toggle_voice()
         elif command == "login":
             self.copilot_login()
+        elif command == "restart":
+            self.restart_voice()
         elif command == "help":
-            self.show_notification("/clear /model /voice /login /quit", "info")
+            self.show_notification("/clear /model /voice /restart /login /quit", "info")
         else:
             self.show_notification(f"Unknown: /{command}", "error")
 
@@ -860,6 +931,9 @@ class JarvisApp(App):
 
     @work(exclusive=True)
     async def process_message(self, user_input: str) -> None:
+        # Push user message to streaming interface
+        await streaming_interface.push_user_message(user_input)
+        
         thinking = self.query_one("#thinking-line", Static)
         core = self.query_one("#core-display", CoreDisplay)
         tool_activity = self.query_one("#tool-activity", ToolActivity)
@@ -868,6 +942,9 @@ class JarvisApp(App):
         core.set_status("THINKING")
         thinking.update("Processing...")
         self.messages.append({"role": "user", "content": user_input})
+        
+        # Add to conversation buffer
+        await conversation_buffer.add_message({"role": "user", "content": user_input})
 
         if self._selected_model and self._selected_model[0] != "auto":
             backend, model = self._selected_model[0].split(":", 1)
@@ -890,7 +967,7 @@ class JarvisApp(App):
 
         full_response = ""
         tool_calls = []
-        schemas = self.tools.get_schemas()
+        schemas = self.tools.get_filtered_schemas(user_input)
 
         streaming_bubble = StreamingBubble()
         chat.mount(streaming_bubble)
@@ -907,9 +984,16 @@ class JarvisApp(App):
                     streaming_bubble.append_text(content)
                     chat.scroll_end()
                 if calls := msg.get("tool_calls"):
-                    tool_calls = calls
+                    for call in calls:
+                        if call.get("id") not in [tc.get("id") for tc in tool_calls]:
+                            tool_calls.append(call)
+                    log.warning(
+                        f"[TUI] Tool calls in chunk {chunk_count}: {len(calls)} calls, "
+                        f"total unique: {len(tool_calls)}"
+                    )
         log.warning(
-            f"[TUI] Chat stream ended after {chunk_count} chunks, response={len(full_response)} chars"
+            f"[TUI] Chat stream ended after {chunk_count} chunks, "
+            f"response={len(full_response)} chars"
         )
 
         if tool_calls:
@@ -919,6 +1003,12 @@ class JarvisApp(App):
             self.messages.append(
                 {"role": "assistant", "content": full_response, "tool_calls": tool_calls}
             )
+            # Push intermediate response to streaming interface
+            await streaming_interface.push_assistant_message(full_response)
+            await conversation_buffer.add_message(
+                {"role": "assistant", "content": full_response, "tool_calls": tool_calls}
+            )
+            
             tool_results = await self.process_tool_calls(tool_calls, tool_activity)
             log.warning(f"[TUI] Tool results received: {len(tool_results)} results")
             for i, tr in enumerate(tool_results):
@@ -953,17 +1043,26 @@ class JarvisApp(App):
                     if msg := chunk.get("message", {}):
                         if content := msg.get("content"):
                             log.warning(
-                                f"[TUI] Second pass chunk {second_pass_chunks}: {len(content)} chars"
+                                f"[TUI] Second pass chunk {second_pass_chunks}: "
+                                f"{len(content)} chars"
                             )
                             full_response += content
                             streaming_bubble.append_text(content)
                             chat.scroll_end()
                 log.warning(
-                    f"[TUI] Second pass ended after {second_pass_chunks} chunks, response={len(full_response)} chars"
+                    f"[TUI] Second pass ended after {second_pass_chunks} chunks, "
+                    f"response={len(full_response)} chars"
                 )
 
         streaming_bubble.finish()
+        # Remove the streaming bubble and add the final message
+        self.call_later(streaming_bubble.remove)
+        self.add_message(full_response, "assistant")
         self.messages.append({"role": "assistant", "content": full_response})
+        # Push final response to streaming interface
+        await streaming_interface.push_assistant_message(full_response)
+        await conversation_buffer.add_message({"role": "assistant", "content": full_response})
+        
         if len(self.messages) > self._max_messages:
             self.messages = self.messages[-self._max_messages :]
         thinking.update("")
@@ -993,7 +1092,8 @@ class JarvisApp(App):
             activity.add_activity(name, "running")
             result = await self.tools.execute(name, **args)
             log.warning(
-                f"[TUI] Tool {name} result: success={result.success}, data_len={len(str(result.data)) if result.data else 0}, error={result.error}"
+                f"[TUI] Tool {name} result: success={result.success}, "
+                f"data_len={len(str(result.data)) if result.data else 0}, error={result.error}"
             )
             activity.add_activity(name, "done")
             results.append(
@@ -1078,12 +1178,20 @@ class JarvisApp(App):
 
 
 def setup_logging(debug: bool = False) -> None:
+    from rich.console import Console
+    from rich.logging import RichHandler
+
     level = logging.DEBUG if debug else logging.WARNING
-    handlers: list[logging.Handler] = [TextualHandler()]
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    if not root_logger.handlers:
+        root_logger.addHandler(TextualHandler())
     if debug:
-        fh = logging.FileHandler("jarvis_debug.log", mode="w", encoding="utf-8")
-        handlers.append(fh)
-    logging.basicConfig(level=level, handlers=handlers)
+        console = Console(
+            file=open("jarvis_debug.log", "w", encoding="utf-8"), width=120, force_terminal=True
+        )
+        fh = RichHandler(console=console, rich_tracebacks=True)
+        root_logger.addHandler(fh)
 
 
 def main():

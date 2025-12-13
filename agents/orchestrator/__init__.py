@@ -85,21 +85,38 @@ Be concise, helpful, and proactive."""
 
     async def _handle_directly(self, message: str) -> str:
         messages = self._build_messages(message)
-        response = ""
+        max_iterations = 5  # Prevent infinite loops
+        iteration = 0
 
-        async for chunk in self.llm.chat(
-            messages=messages,
-            system=self._coordinator_prompt,
-            tools=self.tools.get_schemas(),
-        ):
-            if "message" in chunk:
-                content = chunk["message"].get("content", "")
-                response += content
-                if tool_calls := chunk["message"].get("tool_calls"):
-                    tool_results = await self._execute_tools(tool_calls)
-                    response += f"\n{tool_results}"
+        while iteration < max_iterations:
+            iteration += 1
 
-        return response.strip()
+            # Get LLM response
+            response = await self.llm.chat_completion(
+                messages=messages,
+                system=self._coordinator_prompt,
+                tools=self.tools.get_schemas(),
+            )
+
+            content = response.get("content", "")
+            tool_calls = response.get("tool_calls", [])
+
+            # If no tool calls in structured response, check for <tool_call> in content
+            if not tool_calls:
+                tool_calls = self._parse_tool_calls_from_text(content)
+
+            if tool_calls:
+                # Execute tools
+                tool_results = await self._execute_tools(tool_calls)
+                # Append tool results as assistant message
+                messages.append({"role": "assistant", "content": content})
+                messages.append({"role": "user", "content": f"Tool results:\n{tool_results}"})
+            else:
+                # No more tool calls, return the final response
+                return content.strip()
+
+        # If max iterations reached, return last content
+        return content.strip()
 
     def _build_messages(self, current_message: str) -> list[dict[str, str]]:
         messages = []

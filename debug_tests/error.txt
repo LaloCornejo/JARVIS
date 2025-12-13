@@ -1,0 +1,20 @@
+
+
+Using proactor: IocpProactor
+╭─────────────────────────────────────────────── Traceback (most recent call last) ────────────────────────────────────────────────╮
+│ C:\Users\Lalo\JARVIS\jarvis\__main__.py:802 in on_voice_response                                                                 │
+│                                                                                                                                  │
+│    799 │                                                                                                                         │
+│    800 │   def on_voice_response(self, event: VoiceResponse) -> None:                                                            │
+│    801 │   │   # Add voice assistant responses to the chat display                                                               │
+│ ❱  802 │   │   self.add_message(event.text, "assistant")                                                                         │
+│    803 │                                                                                                                         │
+│    804 │   def on_input_changed(self, event: Input.Changed) -> None:                                                             │
+│    805 │   │   palette = self.query_one("#command-palette", CommandPalette)                                                      │
+│                                                                                                                                  │
+│ ╭──────────────────────────────────────────── locals ─────────────────────────────────────────────╮                              │
+│ │ event = VoiceResponse()                                                                         │                              │
+│ │  self = JarvisApp(title='J.A.R.V.I.S', classes={'-dark-mode'}, pseudo_classes={'dark', 'blur'}) │                              │
+│ ╰─────────────────────────────────────────────────────────────────────────────────────────────────╯                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+AttributeError: 'JarvisApp' object has no attribute 'add_message'

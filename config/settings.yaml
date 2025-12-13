@@ -3,10 +3,10 @@ jarvis:
   wake_word: "hey jarvis"
 
 llm:
-  backend: gemini
+  backend: ollama
   api_url: http://localhost:11434
-  primary_model: copilot/claude-sonnet-4.5
-  fast_model: gemini-2.5-flash
+  primary_model: qwen3:1.7b
+  fast_model: qwen3:1.7b
   fallback_model: qwen3:1.7b
   temperature: 0.7
   stream: true
@@ -21,7 +21,7 @@ gemini:
 
 ollama:
   api_url: http://localhost:11434
-  vision_model: qwen3:1.7b
+  vision_model: qwen3-vl
   fast_model: qwen3:1.7b
   preload: true
 
@@ -32,7 +32,7 @@ voice_input:
   compute_type: float16
   vad: silero
   silence_duration: 0.5
-  input_device: 2 # Realtek mic
+  input_device: null # Use default device
 
 tts:
   engine: xtts
