@@ -1,20 +1,36 @@
-
-
-Using proactor: IocpProactor
-╭─────────────────────────────────────────────── Traceback (most recent call last) ────────────────────────────────────────────────╮
-│ C:\Users\Lalo\JARVIS\jarvis\__main__.py:802 in on_voice_response                                                                 │
-│                                                                                                                                  │
-│    799 │                                                                                                                         │
-│    800 │   def on_voice_response(self, event: VoiceResponse) -> None:                                                            │
-│    801 │   │   # Add voice assistant responses to the chat display                                                               │
-│ ❱  802 │   │   self.add_message(event.text, "assistant")                                                                         │
-│    803 │                                                                                                                         │
-│    804 │   def on_input_changed(self, event: Input.Changed) -> None:                                                             │
-│    805 │   │   palette = self.query_one("#command-palette", CommandPalette)                                                      │
-│                                                                                                                                  │
-│ ╭──────────────────────────────────────────── locals ─────────────────────────────────────────────╮                              │
-│ │ event = VoiceResponse()                                                                         │                              │
-│ │  self = JarvisApp(title='J.A.R.V.I.S', classes={'-dark-mode'}, pseudo_classes={'dark', 'blur'}) │                              │
-│ ╰─────────────────────────────────────────────────────────────────────────────────────────────────╯                              │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-AttributeError: 'JarvisApp' object has no attribute 'add_message'
+TypeError: StreamingBubble._process_pending_chunks() got an unexpected keyword argument 'delay'
+Exception ignored in: <function BaseSubprocessTransport.__del__ at 0x000001D5FFE4BB00>
+Traceback (most recent call last):
+  File "C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_subprocess.py", line 126, in __del__
+    self.close()
+  File "C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_subprocess.py", line 104, in close
+    proto.pipe.close()
+  File "C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 799, in call_soon
+    self._check_closed()
+  File "C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 545, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Exception ignored in: <function _ProactorBasePipeTransport.__del__ at 0x000001D5FFE6D440>
+Traceback (most recent call last):
+  File "C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 116, in __del__
+    _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+                               ^^^^^^^^
+  File "C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 80, in __repr__
+    info.append(f'fd={self._sock.fileno()}')
+                      ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\windows_utils.py", line 102, in fileno
+    raise ValueError("I/O operation on closed pipe")
+ValueError: I/O operation on closed pipe
+Exception ignored in: <function _ProactorBasePipeTransport.__del__ at 0x000001D5FFE6D440>
+Traceback (most recent call last):
+  File "C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 116, in __del__
+    _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+                               ^^^^^^^^
+  File "C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 80, in __repr__
+    info.append(f'fd={self._sock.fileno()}')
+                      ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lalo\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\windows_utils.py", line 102, in fileno
+    raise ValueError("I/O operation on closed pipe")
+ValueError: I/O operation on closed pipe
