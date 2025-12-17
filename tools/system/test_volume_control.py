@@ -4,16 +4,14 @@ Test script for volume control tools
 """
 
 import asyncio
-import os
-import sys
 
 from tools.system.volume_control import (
+    LowerAppVolumesTool,
     MuteToggleTool,
+    RestoreAppVolumesTool,
     SetVolumeTool,
     VolumeDownTool,
     VolumeUpTool,
-    LowerAppVolumesTool,
-    RestoreAppVolumesTool,
 )
 
 

@@ -9,6 +9,7 @@ from typing import Any
 import rich.logging
 from rich.console import Console
 
+from core.cache import tool_cache
 from tools.base import BaseTool, ToolResult
 from tools.code import ExecutePythonTool, ExecuteShellTool
 from tools.files import (
@@ -733,6 +734,38 @@ class ToolRegistry:
         return schemas
 
     async def execute(self, name: str, **kwargs: Any) -> ToolResult:
+        # Check tool cache first
+        cache_key = tool_cache.generate_tool_cache_key(name, kwargs)
+        cached_result = await tool_cache.get(cache_key)
+        if cached_result is not None:
+            logging.debug(f"Using cached result for tool: {name}")
+            # Record cache hit
+            try:
+                from core.performance_monitor import performance_monitor
+
+                performance_monitor.record_cache_hit("tool", True)
+            except Exception:
+                pass
+            # Still stream as if executing for UI consistency
+            from core.streaming_interface import streaming_interface
+
+            try:
+                await streaming_interface.push_tool_activity(name, "started", {"args": kwargs})
+                await streaming_interface.push_tool_activity(
+                    name, "completed", {"result": cached_result.data}
+                )
+            except Exception as e:
+                logging.debug(f"Failed to stream cached tool activity: {e}")
+            return cached_result
+
+        # Record cache miss
+        try:
+            from core.performance_monitor import performance_monitor
+
+            performance_monitor.record_cache_hit("tool", False)
+        except Exception:
+            pass
+
         # Import streaming interface
         from core.streaming_interface import streaming_interface
 
@@ -770,5 +803,17 @@ class ToolRegistry:
             await streaming_interface.push_tool_activity(name, status, details)
         except Exception as e:
             logging.debug(f"Failed to stream tool completion: {e}")
+
+        # Cache successful results
+        if result.success and result.data is not None:
+            await tool_cache.set(cache_key, result)
+
+        # Record tool usage for performance monitoring
+        try:
+            from core.performance_monitor import performance_monitor
+
+            performance_monitor.record_tool_usage(name)
+        except Exception:
+            pass  # Don't fail if monitoring isn't available
 
         return result

@@ -78,6 +78,7 @@ class TextToSpeech:
 
     async def play_stream(self, text: str, language: str | None = None) -> None:
         import sounddevice as sd
+
         from tools.system.volume_control import LowerAppVolumesTool, RestoreAppVolumesTool
 
         # Lower all app volumes before playing TTS (but keep TTS at 100%)
@@ -119,6 +120,7 @@ class TextToSpeech:
         language: str | None = None,
     ) -> None:
         import sounddevice as sd
+
         from tools.system.volume_control import LowerAppVolumesTool, RestoreAppVolumesTool
 
         log.info("Starting interruptible playback")

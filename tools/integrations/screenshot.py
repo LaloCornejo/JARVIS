@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from core.llm import get_fast_client, get_vision_client
+from core.llm import get_vision_client
 from tools.base import BaseTool, ToolResult
 
 try:

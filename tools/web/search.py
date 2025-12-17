@@ -25,6 +25,7 @@ class WebSearchTool(BaseTool):
         # Exa AI search implementation
         try:
             import os
+
             from exa_py import Exa
 
             # Get API key from environment
@@ -54,7 +55,7 @@ class WebSearchTool(BaseTool):
 
             return ToolResult(success=True, data=formatted_results)
 
-        except Exception as e:
+        except Exception:
             # Fallback to DDG on error
             return await self._execute_ddg(query, num_results)
 

@@ -29,9 +29,11 @@ from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from core.assistant import AssistantState, VoiceAssistant
+from core.cache import intent_cache, should_cache_response
 from core.config import Config
 from core.llm import OllamaClient
 from core.llm.router import ModelRouter
+from core.performance_monitor import performance_monitor
 from core.streaming_interface import conversation_buffer, streaming_interface
 from core.voice.tts import TextToSpeech
 from tools import get_tool_registry
@@ -348,6 +350,231 @@ class ToolActivity(Static):
         return text
 
 
+class PerformanceStats(Static):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._stats_cache = {}
+        self._last_update = 0
+        self._update_interval = 2.0  # Update every 2 seconds
+
+    def on_mount(self) -> None:
+        self.set_interval(self._update_interval, self._update_stats)
+
+    def _update_stats(self) -> None:
+        """Update performance stats periodically"""
+        try:
+            from core.performance_monitor import performance_monitor
+
+            current_time = asyncio.get_event_loop().time()
+            if current_time - self._last_update >= self._update_interval:
+                # Record system stats
+                performance_monitor.record_system_stats()
+                # Get updated stats
+                self._stats_cache = performance_monitor.get_stats()
+                self._last_update = current_time
+                self.refresh()
+        except Exception as e:
+            # Silently handle errors to avoid disrupting the UI
+            # Keep the last good stats if available
+            if not self._stats_cache:
+                self._stats_cache = {"error": "Stats unavailable"}
+            pass
+
+    def render(self) -> Text:
+        text = Text()
+
+        if not self._stats_cache:
+            text.append("  Stats loading...\n", style="#666666")
+            text.append("  Please wait for\n", style="#666666")
+            text.append("  performance data\n", style="#666666")
+            return text
+
+        if self._stats_cache.get("error"):
+            text.append("  Stats unavailable\n", style="#aa4444")
+            text.append("  Check system status\n", style="#aa4444")
+            return text
+
+        # Show ALL comprehensive metrics in detailed format
+        stats = self._stats_cache
+
+        # Header
+        text.append("═══ PERFORMANCE ═══\n", style="#888888")
+
+        # Quick Health Summary
+        health_indicators = []
+
+        # Overall response health
+        ui_stats = stats.get("ui_response_time", {})
+        if ui_stats and ui_stats.get("samples", 0) > 0:
+            ui_mean = ui_stats.get("recent_mean", 0)
+            if ui_mean < 100:
+                health_indicators.append("UI:✓")
+            elif ui_mean < 500:
+                health_indicators.append("UI:~")
+            else:
+                health_indicators.append("UI:✗")
+
+        # Cache health
+        cache_stats = stats.get("cache_hit_rate", {})
+        if cache_stats and cache_stats.get("samples", 0) > 0:
+            hit_rate = cache_stats.get("recent_mean", 0) * 100
+            if hit_rate > 50:
+                health_indicators.append(f"Cache:{hit_rate:.0f}%✓")
+            else:
+                health_indicators.append(f"Cache:{hit_rate:.0f}%")
+
+        # Memory health
+        memory_stats = stats.get("memory_usage", {})
+        if memory_stats and memory_stats.get("samples", 0) > 0:
+            memory_mb = memory_stats.get("current", 0)
+            if memory_mb < 500:
+                health_indicators.append(f"Mem:{memory_mb:.0f}MB✓")
+            else:
+                health_indicators.append(f"Mem:{memory_mb:.0f}MB")
+
+        if health_indicators:
+            text.append("  " + " ".join(health_indicators) + "\n", style="#44aa99")
+            text.append("───────────────────\n", style="#666666")
+
+        # Response Times Section
+        response_count = 0
+        ui_stats = stats.get("ui_response_time", {})
+        llm_stats = stats.get("llm_response_time", {})
+        first_token_stats = stats.get("llm_first_token_time", {})
+        token_stats = stats.get("llm_token_rate", {})
+        tts_stats = stats.get("tts_start_time", {})
+        stt_stats = stats.get("stt_recognition_time", {})
+
+        if (
+            (ui_stats and ui_stats.get("samples", 0) > 0)
+            or (llm_stats and llm_stats.get("samples", 0) > 0)
+            or (first_token_stats and first_token_stats.get("samples", 0) > 0)
+            or (token_stats and token_stats.get("samples", 0) > 0)
+            or (tts_stats and tts_stats.get("samples", 0) > 0)
+            or (stt_stats and stt_stats.get("samples", 0) > 0)
+        ):
+            text.append("Response Times:\n", style="#66aaff")
+
+            # UI Response Time
+            if ui_stats and ui_stats.get("samples", 0) > 0:
+                ui_mean = ui_stats.get("recent_mean", 0)
+                ui_current = ui_stats.get("current", 0)
+                text.append(f"  UI: {ui_current:.1f}ms ({ui_mean:.1f}ms avg)\n", style="#66aaff")
+                response_count += 1
+
+            # LLM Response Time
+            if llm_stats and llm_stats.get("samples", 0) > 0:
+                llm_mean = llm_stats.get("recent_mean", 0)
+                llm_current = llm_stats.get("current", 0)
+                text.append(f"  LLM: {llm_current:.1f}ms ({llm_mean:.1f}ms avg)\n", style="#44aa99")
+                response_count += 1
+
+            # LLM First Token Time
+            if first_token_stats and first_token_stats.get("samples", 0) > 0:
+                ft_mean = first_token_stats.get("recent_mean", 0)
+                text.append(f"  First Token: {ft_mean:.1f}ms\n", style="#44aa99")
+                response_count += 1
+
+            # LLM Token Rate
+            if token_stats and token_stats.get("samples", 0) > 0:
+                token_rate = token_stats.get("recent_mean", 0)
+                text.append(f"  Token Rate: {token_rate:.1f} t/s\n", style="#44aa99")
+                response_count += 1
+
+            # TTS Response Time
+            if tts_stats and tts_stats.get("samples", 0) > 0:
+                tts_mean = tts_stats.get("recent_mean", 0)
+                # Filter out obviously wrong TTS times (timestamps)
+                if tts_mean < 10000:  # Less than 10 seconds
+                    text.append(f"  TTS: {tts_mean:.1f}ms avg\n", style="#ffaa44")
+                    response_count += 1
+
+            # STT Recognition Time
+            if stt_stats and stt_stats.get("samples", 0) > 0:
+                stt_mean = stt_stats.get("recent_mean", 0)
+                text.append(f"  STT: {stt_mean:.1f}ms avg\n", style="#ffaa44")
+                response_count += 1
+
+        # Tool Performance Section
+        tool_stats = stats.get("tool_execution_time", {})
+        tool_count_stats = stats.get("tool_usage_count", {})
+        cache_stats = stats.get("cache_hit_rate", {})
+
+        if (
+            (tool_stats and tool_stats.get("samples", 0) > 0)
+            or (tool_count_stats and tool_count_stats.get("samples", 0) > 0)
+            or (cache_stats and cache_stats.get("samples", 0) > 0)
+        ):
+            text.append("Tool Performance:\n", style="#44aa99")
+
+            # Tool Execution Time
+            if tool_stats and tool_stats.get("samples", 0) > 0:
+                tool_mean = tool_stats.get("recent_mean", 0)
+                tool_current = tool_stats.get("current", 0)
+                text.append(
+                    f"  Exec: {tool_current:.1f}ms ({tool_mean:.1f}ms avg)\n", style="#44aa99"
+                )
+
+            # Tool Usage Count
+            if tool_count_stats and tool_count_stats.get("samples", 0) > 0:
+                total_calls = tool_count_stats.get("samples", 0)
+                text.append(f"  Calls: {total_calls}\n", style="#44aa99")
+
+            # Cache Performance
+            if cache_stats and cache_stats.get("samples", 0) > 0:
+                hit_rate = cache_stats.get("recent_mean", 0) * 100
+                text.append(f"  Cache: {hit_rate:.1f}% hit rate\n", style="#44aa99")
+
+        # System Resources Section
+        memory_stats = stats.get("memory_usage", {})
+        cpu_stats = stats.get("cpu_usage", {})
+
+        if (memory_stats and memory_stats.get("samples", 0) > 0) or (
+            cpu_stats and cpu_stats.get("samples", 0) > 0
+        ):
+            text.append("System Resources:\n", style="#ffaa44")
+
+            # Memory Usage
+            if memory_stats and memory_stats.get("samples", 0) > 0:
+                memory_mb = memory_stats.get("current", 0)
+                text.append(f"  Memory: {memory_mb:.1f}MB\n", style="#ffaa44")
+
+            # CPU Usage
+            if cpu_stats and cpu_stats.get("samples", 0) > 0:
+                cpu_percent = cpu_stats.get("current", 0)
+                text.append(f"  CPU: {cpu_percent:.1f}%\n", style="#ffaa44")
+
+        # Network Section
+        network_stats = stats.get("network_latency", {})
+
+        if network_stats and network_stats.get("samples", 0) > 0:
+            text.append("Network:\n", style="#aa44ff")
+
+            # Network Latency
+            net_mean = network_stats.get("recent_mean", 0)
+            net_current = network_stats.get("current", 0)
+            text.append(f"  Latency: {net_current:.1f}ms ({net_mean:.1f}ms avg)\n", style="#aa44ff")
+
+        # Uptime
+        uptime_seconds = stats.get("uptime_seconds", 0)
+        if uptime_seconds > 0:
+            hours = int(uptime_seconds // 3600)
+            minutes = int((uptime_seconds % 3600) // 60)
+            seconds = int(uptime_seconds % 60)
+            if hours > 0:
+                uptime_str = f"{hours}h {minutes}m {seconds}s"
+            elif minutes > 0:
+                uptime_str = f"{minutes}m {seconds}s"
+            else:
+                uptime_str = f"{seconds}s"
+            text.append(f"  Uptime: {uptime_str}\n", style="#888888")
+
+        # Footer
+        text.append("═══════════════════", style="#666666")
+
+        return text
+
+
 class CommandInput(Input):
     pass
 
@@ -358,6 +585,7 @@ COMMANDS = [
     ("theme", "Switch UI theme"),
     ("voice", "Toggle voice input/output"),
     ("restart", "Restart voice system"),
+    ("perf", "Show performance statistics"),
     ("help", "Show available commands"),
     ("quit", "Exit JARVIS"),
 ]
@@ -478,7 +706,7 @@ class JarvisApp(App):
     }
 
     #right-panel {
-        width: 20;
+        width: 24;
         height: 100%;
         background: #0f0f0f;
         border-left: solid #1a1a1a;
@@ -510,8 +738,18 @@ class JarvisApp(App):
 
     #tool-activity {
         height: auto;
-        min-height: 8;
-        max-height: 12;
+        min-height: 6;
+        max-height: 10;
+        background: #0a0a0a;
+        border: solid #1a1a1a;
+        padding: 1;
+        margin: 1;
+    }
+
+    #performance-stats {
+        height: auto;
+        min-height: 16;
+        max-height: 25;
         background: #0a0a0a;
         border: solid #1a1a1a;
         padding: 1;
@@ -730,6 +968,8 @@ class JarvisApp(App):
             with Vertical(id="right-panel"):
                 yield Static("  TOOL ACTIVITY", classes="panel-title")
                 yield ToolActivity(id="tool-activity")
+                yield Static("  PERFORMANCE", classes="panel-title")
+                yield PerformanceStats(id="performance-stats")
         yield ModelSelector(id="model-selector")
         yield ThemeSelector(id="theme-selector")
 
@@ -1031,8 +1271,11 @@ class JarvisApp(App):
             self.action_toggle_voice()
         elif command == "restart":
             self.restart_voice()
+        elif command == "perf":
+            stats = performance_monitor.format_performance_summary()
+            self.show_notification(stats, "info")
         elif command == "help":
-            self.show_notification("/clear /model /theme /voice /restart /help /quit", "info")
+            self.show_notification("/clear /model /theme /voice /restart /perf /help /quit", "info")
         else:
             self.show_notification(f"Unknown: /{command}", "error")
 
@@ -1245,6 +1488,24 @@ class JarvisApp(App):
         log.warning(f"[TUI] process_message: model={client.model}")
         thinking.update(f"Using {client.model}...")
 
+        # Check intent cache for simple queries
+        cache_key = intent_cache._generate_key(user_input, SYSTEM_PROMPT)
+        cached_response = await intent_cache.get(cache_key)
+        if cached_response and should_cache_response(user_input, cached_response):
+            log.warning("[TUI] Using cached response")
+            # Record cache hit
+            performance_monitor.record_cache_hit("intent", True)
+            thinking.update("")
+            core.set_status("ONLINE")
+            # Add cached response to chat
+            self.add_message(cached_response, "assistant")
+            await streaming_interface.push_assistant_message(cached_response)
+            await conversation_buffer.add_message({"role": "assistant", "content": cached_response})
+            return
+
+        # Record cache miss
+        performance_monitor.record_cache_hit("intent", False)
+
         full_response = ""
         tool_calls = []
         schemas = self.tools.get_filtered_schemas(user_input)
@@ -1254,6 +1515,7 @@ class JarvisApp(App):
         chat.scroll_end()
 
         log.warning(f"[TUI] Starting chat stream with {type(client).__name__}")
+        start_time = asyncio.get_event_loop().time()
         chunk_count = 0
         async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT, tools=schemas):
             chunk_count += 1
@@ -1275,6 +1537,8 @@ class JarvisApp(App):
             f"[TUI] Chat stream ended after {chunk_count} chunks, "
             f"response={len(full_response)} chars"
         )
+        duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
+        performance_monitor.record_llm_response(duration_ms, True)
 
         if tool_calls:
             tool_names = [c.get("function", {}).get("name") for c in tool_calls]
@@ -1342,6 +1606,10 @@ class JarvisApp(App):
         await streaming_interface.push_assistant_message(full_response)
         await conversation_buffer.add_message({"role": "assistant", "content": full_response})
 
+        # Cache response if appropriate
+        if should_cache_response(user_input, full_response):
+            await intent_cache.set(cache_key, full_response)
+
         if len(self.messages) > self._max_messages:
             self.messages = self.messages[-self._max_messages :]
         thinking.update("")
@@ -1359,8 +1627,7 @@ class JarvisApp(App):
     async def process_tool_calls(
         self, tool_calls: list[dict], activity: ToolActivity
     ) -> list[dict]:
-        results = []
-        for call in tool_calls:
+        async def execute_single_tool(call: dict) -> dict:
             fn = call.get("function", {})
             name = fn.get("name", "")
             args = fn.get("arguments", {})
@@ -1374,16 +1641,34 @@ class JarvisApp(App):
                 f"[TUI] Tool {name} result: success={result.success}, "
                 f"data_len={len(str(result.data)) if result.data else 0}, error={result.error}"
             )
-            results.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": json.dumps(
-                        result.data if result.success else {"error": result.error}
-                    ),
-                }
-            )
-        return results
+            return {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": json.dumps(result.data if result.success else {"error": result.error}),
+            }
+
+        # Execute tools in parallel
+        results = await asyncio.gather(
+            *[execute_single_tool(call) for call in tool_calls], return_exceptions=True
+        )
+        # Filter out exceptions and handle them
+        valid_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                log.error(f"[TUI] Tool execution error: {result}")
+                # Create error result
+                call = tool_calls[i]
+                tool_call_id = call.get("id", "")
+                valid_results.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": json.dumps({"error": str(result)}),
+                    }
+                )
+            else:
+                valid_results.append(result)
+        return valid_results
 
     def action_select_model(self) -> None:
         selector = self.query_one("#model-selector", ModelSelector)
