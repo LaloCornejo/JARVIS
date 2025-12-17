@@ -1,11 +1,11 @@
 """Python wrapper for high-performance JARVIS Rust tools"""
 
 import asyncio
-import subprocess
 import json
-import os
-from typing import Optional, List, Dict, Any
+import subprocess
 from pathlib import Path
+from typing import Any, Dict, Optional
+
 
 class RustToolError(Exception):
     """Exception raised when a Rust tool fails"""
@@ -13,25 +13,25 @@ class RustToolError(Exception):
 
 class RustToolsClient:
     """Client for calling high-performance JARVIS Rust tools"""
-    
+
     def __init__(self):
         # Find the rust-tools directory relative to this file
         self.rust_tools_dir = Path(__file__).parent.parent / "rust-tools"
         self.release_dir = self.rust_tools_dir / "target" / "release"
-        
+
         # Verify tools exist
         required_tools = [
             "jarvis-file-processor.exe",
             "jarvis-model-manager.exe"
         ]
-        
+
         for tool in required_tools:
             if not (self.release_dir / tool).exists():
                 raise FileNotFoundError(f"{tool} not found. Please build Rust tools first.")
-    
+
     def file_search(
-        self, 
-        pattern: str, 
+        self,
+        pattern: str,
         path: str,
         limit: int = 100,
         ignore_case: bool = False
@@ -58,10 +58,10 @@ class RustToolsClient:
             path,
             "--limit", str(limit)
         ]
-        
+
         if ignore_case:
             cmd.append("--ignore-case")
-        
+
         try:
             result = subprocess.run(
                 cmd,
@@ -69,7 +69,7 @@ class RustToolsClient:
                 text=True,
                 timeout=300  # 5 minute timeout
             )
-            
+
             if result.returncode == 0:
                 return json.loads(result.stdout.strip())
             else:
@@ -77,17 +77,17 @@ class RustToolsClient:
                 if result.stderr:
                     error_msg += f": {result.stderr}"
                 raise RustToolError(error_msg)
-                
+
         except subprocess.TimeoutExpired:
             raise RustToolError("Rust file processor timed out")
         except json.JSONDecodeError as e:
             raise RustToolError(f"Failed to parse Rust tool output: {str(e)}")
         except Exception as e:
             raise RustToolError(f"Failed to run Rust file processor: {str(e)}")
-    
+
     async def async_file_search(
-        self, 
-        pattern: str, 
+        self,
+        pattern: str,
         path: str,
         limit: int = 100,
         ignore_case: bool = False
@@ -97,10 +97,10 @@ class RustToolsClient:
         """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, 
+            None,
             lambda: self.file_search(pattern, path, limit, ignore_case)
         )
-    
+
     def line_count(self, path: str) -> Dict[str, Any]:
         """
         Count lines in a file using the high-performance Rust tool.
@@ -119,7 +119,7 @@ class RustToolsClient:
             "line-count",
             path
         ]
-        
+
         try:
             result = subprocess.run(
                 cmd,
@@ -127,7 +127,7 @@ class RustToolsClient:
                 text=True,
                 timeout=30
             )
-            
+
             if result.returncode == 0:
                 return json.loads(result.stdout.strip())
             else:
@@ -135,14 +135,14 @@ class RustToolsClient:
                 if result.stderr:
                     error_msg += f": {result.stderr}"
                 raise RustToolError(error_msg)
-                
+
         except subprocess.TimeoutExpired:
             raise RustToolError("Rust file processor timed out")
         except json.JSONDecodeError as e:
             raise RustToolError(f"Failed to parse Rust tool output: {str(e)}")
         except Exception as e:
             raise RustToolError(f"Failed to run Rust file processor: {str(e)}")
-    
+
     def extract_data(self, path: str, pattern: str) -> Dict[str, Any]:
         """
         Extract structured data from files using regex patterns.
@@ -163,7 +163,7 @@ class RustToolsClient:
             path,
             pattern
         ]
-        
+
         try:
             result = subprocess.run(
                 cmd,
@@ -171,7 +171,7 @@ class RustToolsClient:
                 text=True,
                 timeout=30
             )
-            
+
             if result.returncode == 0:
                 return json.loads(result.stdout.strip())
             else:
@@ -179,7 +179,7 @@ class RustToolsClient:
                 if result.stderr:
                     error_msg += f": {result.stderr}"
                 raise RustToolError(error_msg)
-                
+
         except subprocess.TimeoutExpired:
             raise RustToolError("Rust file processor timed out")
         except json.JSONDecodeError as e:
@@ -199,7 +199,7 @@ def get_rust_tools_client() -> RustToolsClient:
 
 # Convenience functions
 def file_search(
-    pattern: str, 
+    pattern: str,
     path: str,
     limit: int = 100,
     ignore_case: bool = False
@@ -209,7 +209,7 @@ def file_search(
     return client.file_search(pattern, path, limit, ignore_case)
 
 async def async_file_search(
-    pattern: str, 
+    pattern: str,
     path: str,
     limit: int = 100,
     ignore_case: bool = False

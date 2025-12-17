@@ -1,12 +1,14 @@
 import asyncio
+
 from core.llm.ollama import OllamaClient
+
 
 async def test_detailed():
     print("Creating Ollama client with gemma3...")
     client = OllamaClient(model="gemma3:latest")
     print(f"Base URL: {client.base_url}")
     print(f"Model: {client.model}")
-    
+
     print("\nTesting health check...")
     try:
         result = await client.health_check()
@@ -15,7 +17,7 @@ async def test_detailed():
         print(f"Health check exception: {e}")
         import traceback
         traceback.print_exc()
-    
+
     print("\nTesting direct client creation...")
     try:
         http_client = await client._get_client()

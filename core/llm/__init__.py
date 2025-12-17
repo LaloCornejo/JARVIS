@@ -10,9 +10,10 @@ _fast_client: OllamaClient | None = None
 def get_vision_client() -> OllamaClient:
     global _vision_client
     if _vision_client is None:
-        _vision_client = OllamaClient(model="gemma3:latest")
+        _vision_client = OllamaClient(model="qwen3-vl:latest")
         # Preload the model asynchronously
         import asyncio
+
         try:
             # Try to preload in background
             asyncio.create_task(_vision_client.preload_model())
@@ -27,6 +28,7 @@ def get_fast_client() -> OllamaClient:
         _fast_client = OllamaClient(model="qwen3:1.7b")
         # Preload the model asynchronously
         import asyncio
+
         try:
             # Try to preload in background
             asyncio.create_task(_fast_client.preload_model())

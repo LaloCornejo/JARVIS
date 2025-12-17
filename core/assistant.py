@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import sounddevice as sd
 import openwakeword
+import sounddevice as sd
 
 from core.config import Config
 from core.learning.improvement import SelfImprovement
@@ -19,11 +19,11 @@ from core.llm.copilot import CopilotClient
 from core.llm.gemini import GeminiClient
 from core.proactive import ProactiveMonitor
 from core.security.permissions import PermissionManager
+from core.threading_manager import StreamManager, TaskCoordinator, ThreadingManager
 from core.voice.stt import SpeechToText
 from core.voice.tts import TextToSpeech
 from core.voice.vad import VoiceActivityDetector
 from core.voice.wake_word import WakeWordDetector
-from core.threading_manager import ThreadingManager, TaskCoordinator, StreamManager
 
 if TYPE_CHECKING:
     from tools import ToolRegistry
@@ -66,37 +66,15 @@ class VoiceAssistant:
         )
         self._preload_ollama = self.config.get("ollama.preload", False)
 
-        if gemini_client:
-            self.gemini = gemini_client
-        else:
-            self.gemini = None
-            gemini_key = self.config.get("gemini.api_key_env")
-            if gemini_key:
-                import os
-
-                api_key = os.environ.get(gemini_key, "")
-                if api_key:
-                    log.debug("Initializing GeminiClient")
-                    self.gemini = GeminiClient(
-                        api_key=api_key,
-                        model=self.config.get("gemini.default_model", "gemini-2.5-flash"),
-                    )
-
-        if copilot_client:
-            self.copilot = copilot_client
-        else:
-            log.debug("Initializing CopilotClient")
-            self.copilot = CopilotClient()
+        # Remove Gemini and Copilot clients since we're only using local models
+        self.gemini = None
+        self.copilot = None
 
         primary_backend = self.config.get("llm.backend", "ollama")
         self.router = ModelRouter(
             ollama_client=self.ollama,
-            copilot_client=self.copilot,
-            gemini_client=self.gemini,
             ollama_model=self.config.get("llm.primary_model", "qwen3:1.7b"),
-            gemini_model=self.config.get("gemini.default_model", "gemini-2.5-flash"),
             primary_backend=primary_backend,
-            use_copilot_for_complex=True,
         )
         self.llm = self.ollama
         log.debug("Initializing TTS: %s", self.config.tts_base_url)
@@ -197,17 +175,13 @@ class VoiceAssistant:
             return []
 
         try:
-            result = await self.tools.execute(
-                'recall_memory',
-                query=query,
-                limit=limit
-            )
+            result = await self.tools.execute("recall_memory", query=query, limit=limit)
             if result.success:
-                memories = result.data.get('memories', [])
+                memories = result.data.get("memories", [])
                 # Filter out low relevance memories
-                return [m for m in memories if m.get('relevance', 0) > 0.5]
+                return [m for m in memories if m.get("relevance", 0) > 0.5]
         except Exception as e:
-            log.warning(f'Memory recall failed: {e}')
+            log.warning(f"Memory recall failed: {e}")
         return []
 
     async def generate_response(self, text: str) -> str | None:
@@ -249,14 +223,9 @@ class VoiceAssistant:
 
         try:
             log.info("Starting LLM chat with backend: %s", backend)
-            client = None
-            if backend == "gemini" and self.gemini:
-                client = self.gemini
-            elif backend == "copilot" and self.copilot:
-                client = self.copilot
-            else:
-                client = self.ollama
-                client.model = model
+            # Always use Ollama since we removed Copilot and Gemini
+            client = self.ollama
+            client.model = model
 
             async for chunk in client.chat(
                 messages=self._messages,
@@ -449,17 +418,15 @@ class VoiceAssistant:
     def interrupt(self) -> None:
         log.info("Interrupting current operation")
         self._interrupted = True
-        
+
         # Cancel coordinated tasks
         async def cancel_all_tasks():
             await self.task_coordinator.cancel_task("process_and_respond")
             await self.task_coordinator.cancel_task("generate_response")
             await self.task_coordinator.cancel_task("partial_transcription")
-            
+
         if self._loop:
-            self._loop.call_soon_threadsafe(
-                lambda: asyncio.create_task(cancel_all_tasks())
-            )
+            self._loop.call_soon_threadsafe(lambda: asyncio.create_task(cancel_all_tasks()))
 
     async def handle_wake_word(self) -> None:
         if self.state != AssistantState.IDLE:
@@ -497,8 +464,7 @@ class VoiceAssistant:
             and len(self._audio_buffer) % self._transcribe_interval == 0
         ):
             await self.task_coordinator.start_task(
-                "partial_transcription", 
-                self._do_partial_transcription()
+                "partial_transcription", self._do_partial_transcription()
             )
 
         if (
@@ -511,8 +477,7 @@ class VoiceAssistant:
 
             # Use coordinated task management for main processing
             await self.task_coordinator.start_task(
-                "process_and_respond",
-                self._process_and_respond(full_audio)
+                "process_and_respond", self._process_and_respond(full_audio)
             )
 
         if (
@@ -525,8 +490,7 @@ class VoiceAssistant:
 
             # Use coordinated task management for main processing
             await self.task_coordinator.start_task(
-                "process_and_respond",
-                self._process_and_respond(full_audio)
+                "process_and_respond", self._process_and_respond(full_audio)
             )
 
     async def _do_partial_transcription(self) -> None:
@@ -542,8 +506,7 @@ class VoiceAssistant:
                 if self._on_partial_transcription:
                     # Stream the partial transcription
                     await self.stream_manager.push_to_stream(
-                        "transcription_stream", 
-                        self._last_transcription
+                        "transcription_stream", self._last_transcription
                     )
                     self._on_partial_transcription(self._last_transcription)
         except Exception as e:
@@ -554,34 +517,32 @@ class VoiceAssistant:
         try:
             # Process speech synchronously (already runs in executor)
             text = self.process_speech_sync(audio)
-            
+
             log.info("Transcription result: %s", text)
             if text and not self._interrupted:
                 log.info("Generating response...")
-                
+
                 # Stream the user input
                 await self.stream_manager.push_to_stream(
-                    "conversation_stream", 
-                    {"role": "user", "content": text}
+                    "conversation_stream", {"role": "user", "content": text}
                 )
-                
+
                 # Generate response directly (it's already a coroutine)
                 response = await self.generate_response(text)
-                
+
                 # Ensure response is a string
                 if response is not None and not isinstance(response, str):
                     response = str(response)
-                
+
                 log.info("Response generated: %s", response[:50] if response else None)
                 if response and not self._interrupted:
                     log.info("Calling speak_response...")
-                    
+
                     # Stream the assistant response
                     await self.stream_manager.push_to_stream(
-                        "conversation_stream", 
-                        {"role": "assistant", "content": response}
+                        "conversation_stream", {"role": "assistant", "content": response}
                     )
-                    
+
                     # Speak response synchronously
                     self.speak_response_sync(response)
                 elif self._interrupted:
@@ -623,17 +584,19 @@ class VoiceAssistant:
             self.set_state(AssistantState.SPEAKING)
             log.info("Speaking response: %s", text[:50] + "..." if len(text) > 50 else text)
             # Run the TTS in a separate thread with its own event loop
-            import threading
             import asyncio
-            
+            import threading
+
             def run_tts():
                 new_loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(new_loop)
                 try:
-                    new_loop.run_until_complete(self.tts.play_stream_interruptible(text, lambda: self._interrupted))
+                    new_loop.run_until_complete(
+                        self.tts.play_stream_interruptible(text, lambda: self._interrupted)
+                    )
                 finally:
                     new_loop.close()
-            
+
             thread = threading.Thread(target=run_tts, daemon=True)
             thread.start()
             thread.join()
@@ -646,7 +609,7 @@ class VoiceAssistant:
 
     def _start_audio_stream(self) -> None:
         """Start audio stream for speech capture after wake word"""
-        if hasattr(self, '_audio_stream') and self._audio_stream is not None:
+        if hasattr(self, "_audio_stream") and self._audio_stream is not None:
             return  # Already running
 
         def audio_callback(indata: np.ndarray, frames: int, time_info: Any, status: Any) -> None:
@@ -654,9 +617,7 @@ class VoiceAssistant:
                 # Convert to float32 and send to queue
                 audio_chunk = indata[:, 0].astype(np.float32)
                 try:
-                    self._loop.call_soon_threadsafe(
-                        self._audio_queue.put_nowait, audio_chunk
-                    )
+                    self._loop.call_soon_threadsafe(self._audio_queue.put_nowait, audio_chunk)
                 except Exception:
                     pass  # Queue full or error
 
@@ -754,8 +715,8 @@ class VoiceAssistant:
 
     async def health_check(self) -> dict:
         results = {}
-        results['tts'] = await self.tts.health_check()
-        results['stt'] = self.stt.health_check()
-        results['vad'] = self.vad.health_check()
-        results['wake_word'] = self.wake_word.health_check()
+        results["tts"] = await self.tts.health_check()
+        results["stt"] = self.stt.health_check()
+        results["vad"] = self.vad.health_check()
+        results["wake_word"] = self.wake_word.health_check()
         return results

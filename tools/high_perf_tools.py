@@ -1,14 +1,15 @@
 """High-performance tools for JARVIS using Rust backends"""
 
-from tools.base import BaseTool, ToolResult
 import asyncio
-import subprocess
 import json
 from pathlib import Path
 
+from tools.base import BaseTool, ToolResult
+
+
 class HighPerfDataProcessorTool(BaseTool):
     """High-performance data processing using Rust backend"""
-    
+
     name = "high_perf_data_processor"
     description = "Process large datasets with high-performance Rust backend"
     parameters = {
@@ -47,11 +48,11 @@ class HighPerfDataProcessorTool(BaseTool):
             # Check if Rust tool is available
             rust_tools_dir = Path(__file__).parent.parent / "rust-tools" / "target" / "release"
             rust_processor = rust_tools_dir / "jarvis-data-processor.exe"
-            
+
             if not rust_processor.exists():
                 # Fallback to Python implementation for demo
                 return await self._python_fallback(operation, dataset_path, criteria or {})
-            
+
             # Use Rust tool for heavy processing
             cmd = [
                 str(rust_processor),
@@ -61,16 +62,16 @@ class HighPerfDataProcessorTool(BaseTool):
                 operation,
                 ""  # field parameter (empty for now)
             ]
-            
+
             # Run Rust tool asynchronously
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            
+
             stdout, stderr = await process.communicate()
-            
+
             if process.returncode == 0:
                 try:
                     result = json.loads(stdout.decode())
@@ -80,31 +81,31 @@ class HighPerfDataProcessorTool(BaseTool):
             else:
                 error_msg = stderr.decode() if stderr else "Rust tool failed"
                 return ToolResult(success=False, data=None, error=error_msg)
-                
+
         except Exception as e:
             return ToolResult(success=False, data=None, error=str(e))
-    
+
     async def _python_fallback(self, operation: str, dataset_path: str, criteria: dict) -> ToolResult:
         """Fallback Python implementation"""
         import time
         start_time = time.time()
-        
+
         # Simulate processing
         await asyncio.sleep(0.1)  # Simulate some work
-        
+
         duration = time.time() - start_time
         return ToolResult(success=True, data={
             "operation": operation,
             "dataset": dataset_path,
             "duration_ms": round(duration * 1000, 2),
             "fallback_used": True,
-            "message": f"Processed using Python fallback (would be faster with Rust for large datasets)"
+            "message": "Processed using Python fallback (would be faster with Rust for large datasets)"
         })
 
 
 class HighPerfFileAnalyzerTool(BaseTool):
     """High-performance file analysis using Rust backend"""
-    
+
     name = "high_perf_file_analyzer"
     description = "Analyze files and directories with high-performance Rust backend"
     parameters = {
@@ -138,30 +139,30 @@ class HighPerfFileAnalyzerTool(BaseTool):
             # Check if Rust tool is available
             rust_tools_dir = Path(__file__).parent.parent / "rust-tools" / "target" / "release"
             rust_processor = rust_tools_dir / "jarvis-data-processor.exe"
-            
+
             if not rust_processor.exists():
                 # Fallback to Python implementation
                 return await self._python_fallback(path, pattern)
-            
+
             # Use Rust tool for analysis
             cmd = [
                 str(rust_processor),
                 "analyze-files",
                 path
             ]
-            
+
             if pattern:
                 cmd.append(pattern)
-            
+
             # Run Rust tool asynchronously
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            
+
             stdout, stderr = await process.communicate()
-            
+
             if process.returncode == 0:
                 try:
                     result = json.loads(stdout.decode())
@@ -171,16 +172,16 @@ class HighPerfFileAnalyzerTool(BaseTool):
             else:
                 error_msg = stderr.decode() if stderr else "Rust tool failed"
                 return ToolResult(success=False, data=None, error=error_msg)
-                
+
         except Exception as e:
             return ToolResult(success=False, data=None, error=str(e))
-    
+
     async def _python_fallback(self, path: str, pattern: str = None) -> ToolResult:
         """Fallback Python implementation"""
-        import time
         import os
+        import time
         start_time = time.time()
-        
+
         # Simple file analysis
         file_stats = []
         if os.path.isdir(path):
@@ -208,7 +209,7 @@ class HighPerfFileAnalyzerTool(BaseTool):
                 })
             except:
                 pass
-        
+
         duration = time.time() - start_time
         return ToolResult(success=True, data={
             "files_analyzed": len(file_stats),

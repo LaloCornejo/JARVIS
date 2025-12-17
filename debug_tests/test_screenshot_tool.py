@@ -1,5 +1,7 @@
 import asyncio
+
 from tools.integrations.screenshot import ScreenshotAnalyzeTool
+
 
 async def test_screenshot_tool():
     tool = ScreenshotAnalyzeTool()

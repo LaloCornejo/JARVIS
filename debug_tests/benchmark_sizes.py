@@ -1,18 +1,20 @@
 import asyncio
 import time
-from tools.integrations.screenshot import ScreenshotManager, get_screenshot_manager
+
 from core.llm import get_vision_client
+from tools.integrations.screenshot import get_screenshot_manager
+
 
 async def benchmark_size(size, name, enhanced=False):
     print(f"\n=== Testing {name} ({size[0]}x{size[1]}){' with enhancement' if enhanced else ''} ===")
     manager = get_screenshot_manager()
-    
+
     # Capture screenshot
     success, path, error = await manager.capture_screen()
     if not success:
         print(f"Failed to capture screenshot: {error}")
         return None
-    
+
     # Process image
     start_time = time.time()
     if enhanced:
@@ -20,9 +22,10 @@ async def benchmark_size(size, name, enhanced=False):
         b64 = manager.get_base64_image(path, max_size=size)
     else:
         # Create a simpler version for baseline comparison
-        from PIL import Image
         import base64
         import io
+
+        from PIL import Image
         img = Image.open(path)
         img.thumbnail(size, Image.Resampling.LANCZOS)
         if img.mode in ("RGBA", "LA", "P"):
@@ -30,20 +33,20 @@ async def benchmark_size(size, name, enhanced=False):
         buffered = io.BytesIO()
         img.save(buffered, format="JPEG", quality=75, optimize=True)
         b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    
+
     process_time = time.time() - start_time
-    
+
     if not b64:
         print("Failed to process image")
         return None
-    
+
     print(f"Image processing time: {process_time:.2f}s")
     print(f"Image size: {len(b64)} bytes")
-    
+
     # Vision analysis
     vision = get_vision_client()
     start_time = time.time()
-    
+
     try:
         async with asyncio.timeout(45):
             analysis_text = ""
@@ -55,7 +58,7 @@ async def benchmark_size(size, name, enhanced=False):
                 num_predict=256,
             ):
                 analysis_text += chunk
-            
+
             analysis_time = time.time() - start_time
             print(f"Analysis time: {analysis_time:.2f}s")
             print(f"Total time: {process_time + analysis_time:.2f}s")
@@ -82,7 +85,7 @@ async def benchmark_all():
         ((720, 540), "Medium-Large"),
         ((800, 600), "Large"),
     ]
-    
+
     print("=== BASELINE TESTS ===")
     results = {}
     for size, name in sizes:
@@ -92,7 +95,7 @@ async def benchmark_all():
         except Exception as e:
             print(f"Error testing {name}: {e}")
             results[f"{name} (Baseline)"] = None
-    
+
     print("\n=== ENHANCED PREPROCESSING TESTS ===")
     for size, name in sizes[2:]:  # Only test medium and larger with enhancement
         try:
@@ -101,7 +104,7 @@ async def benchmark_all():
         except Exception as e:
             print(f"Error testing {name} enhanced: {e}")
             results[f"{name} (Enhanced)"] = None
-    
+
     print("\n=== SUMMARY ===")
     for name, time_taken in results.items():
         if time_taken:

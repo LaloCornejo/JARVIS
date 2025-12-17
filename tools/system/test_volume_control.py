@@ -4,23 +4,23 @@ Test script for volume control tools
 """
 
 import asyncio
-import sys
 import os
+import sys
 
 # Add the parent directory to the path so we can import tools
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from tools.registry import get_tool_registry
-from tools.system.volume_control import VolumeUpTool, VolumeDownTool, MuteToggleTool, SetVolumeTool
+from tools.system.volume_control import MuteToggleTool, SetVolumeTool, VolumeDownTool, VolumeUpTool
 
 
 async def test_volume_tools():
     """Test the volume control tools"""
     print("Testing volume control tools...")
-    
+
     # Get the tool registry
     registry = get_tool_registry()
-    
+
     # Test VolumeUpTool
     print("\n1. Testing VolumeUpTool:")
     volume_up_tool = VolumeUpTool()
@@ -30,7 +30,7 @@ async def test_volume_tools():
         print(f"   Data: {result.data}")
     if result.error:
         print(f"   Error: {result.error}")
-    
+
     # Test VolumeDownTool
     print("\n2. Testing VolumeDownTool:")
     volume_down_tool = VolumeDownTool()
@@ -40,7 +40,7 @@ async def test_volume_tools():
         print(f"   Data: {result.data}")
     if result.error:
         print(f"   Error: {result.error}")
-    
+
     # Test MuteToggleTool
     print("\n3. Testing MuteToggleTool:")
     mute_toggle_tool = MuteToggleTool()
@@ -50,7 +50,7 @@ async def test_volume_tools():
         print(f"   Data: {result.data}")
     if result.error:
         print(f"   Error: {result.error}")
-    
+
     # Test SetVolumeTool
     print("\n4. Testing SetVolumeTool:")
     set_volume_tool = SetVolumeTool()
@@ -60,12 +60,12 @@ async def test_volume_tools():
         print(f"   Data: {result.data}")
     if result.error:
         print(f"   Error: {result.error}")
-    
+
     # Test through registry
     print("\n5. Testing through registry:")
     result = await registry.execute("volume_up")
     print(f"   Registry volume_up success: {result.success}")
-    
+
     result = await registry.execute("set_volume", level=30)
     print(f"   Registry set_volume success: {result.success}")
 

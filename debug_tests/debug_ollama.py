@@ -1,18 +1,20 @@
 import asyncio
-from core.llm import get_vision_client, get_fast_client
+
+from core.llm import get_fast_client, get_vision_client
+
 
 async def test_clients():
     print("Testing vision client...")
     vision = get_vision_client()
     vision_healthy = await vision.health_check()
     print(f"Vision client healthy: {vision_healthy}")
-    
+
     if vision_healthy:
         print("Testing fast client...")
         fast = get_fast_client()
         fast_healthy = await fast.health_check()
         print(f"Fast client healthy: {fast_healthy}")
-    
+
     # Test direct API call
     print("\nTesting direct API call...")
     try:

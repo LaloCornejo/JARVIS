@@ -4,19 +4,19 @@ Simple test script for volume control tools
 """
 
 import asyncio
-import sys
 import os
+import sys
 
 # Add the parent directory to the path so we can import tools
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from tools.system.volume_control import VolumeUpTool, VolumeDownTool, MuteToggleTool, SetVolumeTool
+from tools.system.volume_control import MuteToggleTool, SetVolumeTool, VolumeDownTool, VolumeUpTool
 
 
 async def test_volume_tools():
     """Test the volume control tools directly"""
     print("Testing volume control tools directly...")
-    
+
     # Test VolumeUpTool
     print("\n1. Testing VolumeUpTool:")
     volume_up_tool = VolumeUpTool()
@@ -26,7 +26,7 @@ async def test_volume_tools():
         print(f"   Data: {result.data}")
     if result.error:
         print(f"   Error: {result.error}")
-    
+
     # Test VolumeDownTool
     print("\n2. Testing VolumeDownTool:")
     volume_down_tool = VolumeDownTool()
@@ -36,7 +36,7 @@ async def test_volume_tools():
         print(f"   Data: {result.data}")
     if result.error:
         print(f"   Error: {result.error}")
-    
+
     # Test MuteToggleTool
     print("\n3. Testing MuteToggleTool:")
     mute_toggle_tool = MuteToggleTool()
@@ -46,7 +46,7 @@ async def test_volume_tools():
         print(f"   Data: {result.data}")
     if result.error:
         print(f"   Error: {result.error}")
-    
+
     # Test SetVolumeTool
     print("\n4. Testing SetVolumeTool:")
     set_volume_tool = SetVolumeTool()

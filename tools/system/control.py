@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import platform
 import subprocess
 import webbrowser
@@ -87,7 +86,7 @@ def load_discovered_apps():
 def find_app(query: str) -> tuple[str, str] | None:
     # Load discovered apps if available
     load_discovered_apps()
-    
+
     query_lower = query.lower().strip()
 
     if query_lower in APP_REGISTRY:
@@ -126,14 +125,14 @@ class RefreshAppRegistryTool(BaseTool):
             # Run the Rust discovery tool
             tools_dir = Path(__file__).parent.parent
             discovery_exe = tools_dir / "target" / "release" / "discover_apps.exe"
-            
+
             if not discovery_exe.exists():
                 return ToolResult(
-                    success=False, 
-                    data=None, 
+                    success=False,
+                    data=None,
                     error="Discovery tool not found. Please build it first with 'cargo build --release'"
                 )
-            
+
             process = subprocess.run(
                 [str(discovery_exe)],
                 cwd=tools_dir,
@@ -141,7 +140,7 @@ class RefreshAppRegistryTool(BaseTool):
                 text=True,
                 timeout=30
             )
-            
+
             if process.returncode == 0:
                 # Reload the app registry
                 global APP_REGISTRY
@@ -194,10 +193,10 @@ class RefreshAppRegistryTool(BaseTool):
                     "telegram": {"exe": "telegram", "aliases": ["telegram desktop", "telegram app"]},
                     "signal": {"exe": "signal", "aliases": ["signal app", "signal desktop"]},
                 }
-                
+
                 # Load the newly discovered apps
                 load_discovered_apps()
-                
+
                 return ToolResult(
                     success=True,
                     data={"message": "App registry refreshed successfully", "apps_count": len(APP_REGISTRY)}

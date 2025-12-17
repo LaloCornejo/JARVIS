@@ -124,7 +124,7 @@ from tools.web import FetchUrlTool, WebSearchTool
 console = Console()
 
 TOOL_CATEGORIES = {
-"system": {
+    "system": {
         "tools": [
             "get_current_time",
             "set_timer",
@@ -552,15 +552,15 @@ class ToolRegistry:
             ScreenshotListMonitorsTool(),
             ScreenshotListTool(),
             ScreenshotAnalyzeTool(),
-            RustFileSearchTool(),      # High-performance file search
-            RustLineCountTool(),       # High-performance line counting
-            RustDataExtractorTool(),   # High-performance data extraction
-            HighPerfDataProcessorTool(),   # Intelligent high-performance data processor
-            HighPerfFileAnalyzerTool(),    # Parallel file analyzer
-            VolumeUpTool(),            # System volume control
-            VolumeDownTool(),          # System volume control
-            MuteToggleTool(),          # System volume control
-            SetVolumeTool(),           # System volume control
+            RustFileSearchTool(),  # High-performance file search
+            RustLineCountTool(),  # High-performance line counting
+            RustDataExtractorTool(),  # High-performance data extraction
+            HighPerfDataProcessorTool(),  # Intelligent high-performance data processor
+            HighPerfFileAnalyzerTool(),  # Parallel file analyzer
+            VolumeUpTool(),  # System volume control
+            VolumeDownTool(),  # System volume control
+            MuteToggleTool(),  # System volume control
+            SetVolumeTool(),  # System volume control
         ]
         for tool in default_tools:
             self.register(tool)
@@ -578,6 +578,9 @@ class ToolRegistry:
         return [tool.to_schema() for tool in self._tools.values()]
 
     async def _execute_rust_tool(self, name: str, **kwargs: Any) -> ToolResult:
+        # Import streaming interface
+        from core.streaming_interface import streaming_interface
+
         # Color mapping for rich markup
         color_map = {
             "web_search": "blue",
@@ -593,9 +596,14 @@ class ToolRegistry:
         }
         bg_color = color_map.get(name, "white")  # White default
 
-        logging.info(
-            f"[{bg_color}]Starting Rust tool: {name} with args: {kwargs}[/{bg_color}]"
-        )
+        logging.info(f"[{bg_color}]Starting Rust tool: {name} with args: {kwargs}[/{bg_color}]")
+
+        # Stream tool start
+        try:
+            await streaming_interface.push_tool_activity(name, "started", {"args": kwargs})
+        except Exception as e:
+            logging.debug(f"Failed to stream tool start: {e}")
+
         binary_map = {
             "read_file": "read_file",
             "write_file": "write_file",
@@ -653,21 +661,42 @@ class ToolRegistry:
             )
             stdout, stderr = await proc.communicate()
             if proc.returncode != 0:
-                logging.error(
-                    f"[{bg_color}]Rust tool {name} failed: {stderr.decode()}[/{bg_color}]"
-                )
-                return ToolResult(success=False, data=None, error=stderr.decode())
+                error_msg = stderr.decode()
+                logging.error(f"[{bg_color}]Rust tool {name} failed: {error_msg}[/{bg_color}]")
+                # Stream tool failure
+                try:
+                    await streaming_interface.push_tool_activity(
+                        name, "failed", {"error": error_msg, "args": kwargs}
+                    )
+                except Exception as e:
+                    logging.debug(f"Failed to stream tool failure: {e}")
+                return ToolResult(success=False, data=None, error=error_msg)
             data = json.loads(stdout.decode())
             logging.info(
                 f"[{bg_color}]Rust tool {name} success: "
                 f"exit_code={data['exit_code']}, stdout_len={len(data['stdout'])}[/{bg_color}]"
             )
+            # Stream tool success
+            try:
+                await streaming_interface.push_tool_activity(
+                    name, "completed", {"result": data["stdout"], "args": kwargs}
+                )
+            except Exception as e:
+                logging.debug(f"Failed to stream tool completion: {e}")
             return ToolResult(
                 success=data["exit_code"] == 0, data=data["stdout"], error=data["stderr"]
             )
         except Exception as e:
-            logging.error(f"[{bg_color}]Rust tool {name} exception: {str(e)}[/{bg_color}]")
-            return ToolResult(success=False, data=None, error=str(e))
+            error_msg = str(e)
+            logging.error(f"[{bg_color}]Rust tool {name} exception: {error_msg}[/{bg_color}]")
+            # Stream tool failure
+            try:
+                await streaming_interface.push_tool_activity(
+                    name, "failed", {"error": error_msg, "args": kwargs}
+                )
+            except Exception as ex:
+                logging.debug(f"Failed to stream tool failure: {ex}")
+            return ToolResult(success=False, data=None, error=error_msg)
 
     def get_filtered_schemas(self, query: str, max_tools: int = 25) -> list[dict]:
         query_lower = query.lower()
@@ -704,13 +733,42 @@ class ToolRegistry:
         return schemas
 
     async def execute(self, name: str, **kwargs: Any) -> ToolResult:
+        # Import streaming interface
+        from core.streaming_interface import streaming_interface
+
+        # Stream tool start
+        try:
+            await streaming_interface.push_tool_activity(name, "started", {"args": kwargs})
+        except Exception as e:
+            logging.debug(f"Failed to stream tool start: {e}")
+
         if name in RUST_TOOLS:
-            return await self._execute_rust_tool(name, **kwargs)
-        tool = self.get(name)
-        if not tool:
-            logging.error(f"Tool '{name}' not found")
-            return ToolResult(success=False, data=None, error=f"Tool '{name}' not found")
-        logging.info(f"Executing Python tool: {name} with args: {kwargs}")
-        result = await tool.execute(**kwargs)
-        logging.info(f"Python tool {name} result: success={result.success}")
+            result = await self._execute_rust_tool(name, **kwargs)
+        else:
+            tool = self.get(name)
+            if not tool:
+                logging.error(f"Tool '{name}' not found")
+                error_result = ToolResult(
+                    success=False, data=None, error=f"Tool '{name}' not found"
+                )
+                # Stream tool failure
+                try:
+                    await streaming_interface.push_tool_activity(
+                        name, "failed", {"error": f"Tool '{name}' not found"}
+                    )
+                except Exception as e:
+                    logging.debug(f"Failed to stream tool failure: {e}")
+                return error_result
+            logging.info(f"Executing Python tool: {name} with args: {kwargs}")
+            result = await tool.execute(**kwargs)
+            logging.info(f"Python tool {name} result: success={result.success}")
+
+        # Stream tool completion
+        try:
+            status = "completed" if result.success else "failed"
+            details = {"result": result.data} if result.success else {"error": result.error}
+            await streaming_interface.push_tool_activity(name, status, details)
+        except Exception as e:
+            logging.debug(f"Failed to stream tool completion: {e}")
+
         return result
