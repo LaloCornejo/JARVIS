@@ -43,3 +43,19 @@ Thumbs.db
 *token*
 
 data/
+
+# Rust build artifacts
+target/
+
+# Python virtual environment (already there, but confirm)
+# .venv/
+
+# Debug files
+*.pdb
+
+# Large model files or assets if any
+*.pth
+*.dll
+
+# Special files
+NUL

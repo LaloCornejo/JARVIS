@@ -7,19 +7,19 @@ import asyncio
 import os
 import sys
 
-# Add the parent directory to the path so we can import tools
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from tools.registry import get_tool_registry
-from tools.system.volume_control import MuteToggleTool, SetVolumeTool, VolumeDownTool, VolumeUpTool
+from tools.system.volume_control import (
+    MuteToggleTool,
+    SetVolumeTool,
+    VolumeDownTool,
+    VolumeUpTool,
+    LowerAppVolumesTool,
+    RestoreAppVolumesTool,
+)
 
 
 async def test_volume_tools():
     """Test the volume control tools"""
     print("Testing volume control tools...")
-
-    # Get the tool registry
-    registry = get_tool_registry()
 
     # Test VolumeUpTool
     print("\n1. Testing VolumeUpTool:")
@@ -61,13 +61,46 @@ async def test_volume_tools():
     if result.error:
         print(f"   Error: {result.error}")
 
-    # Test through registry
-    print("\n5. Testing through registry:")
-    result = await registry.execute("volume_up")
-    print(f"   Registry volume_up success: {result.success}")
+    # Test LowerAppVolumesTool
+    print("\n5. Testing LowerAppVolumesTool:")
+    lower_tool = LowerAppVolumesTool()
+    result = await lower_tool.execute()
+    print(f"   Success: {result.success}")
+    if result.data:
+        print(f"   Data: {result.data}")
+        # Extract the actual JSON from the stdout
+        stdout_data = result.data.get("stdout", "{}")
+        if '"stdout":' in stdout_data:
+            # Parse the nested JSON structure
+            import json
 
-    result = await registry.execute("set_volume", level=30)
-    print(f"   Registry set_volume success: {result.success}")
+            try:
+                parsed = json.loads(stdout_data)
+                if isinstance(parsed, dict) and "stdout" in parsed:
+                    volume_data = parsed["stdout"]
+                    print(f"   Extracted volume data: {volume_data}")
+                else:
+                    volume_data = "{}"
+            except:
+                volume_data = "{}"
+        else:
+            volume_data = stdout_data
+    if result.error:
+        print(f"   Error: {result.error}")
+        volume_data = "{}"
+
+    # Test RestoreAppVolumesTool
+    print("\n6. Testing RestoreAppVolumesTool:")
+    if volume_data != "{}":
+        restore_tool = RestoreAppVolumesTool()
+        result = await restore_tool.execute(volume_data)
+        print(f"   Success: {result.success}")
+        if result.data:
+            print(f"   Data: {result.data}")
+        if result.error:
+            print(f"   Error: {result.error}")
+    else:
+        print("   Skipping restore test (no volume data to restore)")
 
 
 if __name__ == "__main__":

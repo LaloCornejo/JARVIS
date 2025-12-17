@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process::Command;
 use winreg::enums::*;
 use winreg::RegKey;
+use lnk::ShellLink;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct AppInfo {
@@ -146,22 +147,21 @@ fn get_installed_apps_from_registry() -> Result<Vec<AppInfo>, Box<dyn std::error
 
 fn get_apps_from_start_menu() -> Result<Vec<AppInfo>, Box<dyn std::error::Error>> {
     let mut apps = Vec::new();
-    
+
     // Common start menu locations
-    let start_menu_paths = vec![
-        r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
-        r"C:\Users\Public\Desktop",
+    let mut start_menu_paths: Vec<String> = vec![
+        r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs".to_string(),
+        r"C:\Users\Public\Desktop".to_string(),
     ];
-    
+
     // Also check user-specific start menu
     if let Ok(user_name) = std::env::var("USERNAME") {
         let user_start_menu = format!(r"C:\Users\{}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs", user_name);
         let user_desktop = format!(r"C:\Users\{}\Desktop", user_name);
-        let mut user_paths = start_menu_paths.clone();
-        user_paths.push(&user_start_menu);
-        user_paths.push(&user_desktop);
+        start_menu_paths.push(user_start_menu);
+        start_menu_paths.push(user_desktop);
     }
-    
+
     for base_path in &start_menu_paths {
         let base_dir = Path::new(base_path);
         if base_dir.exists() {
@@ -173,21 +173,30 @@ fn get_apps_from_start_menu() -> Result<Vec<AppInfo>, Box<dyn std::error::Error>
             {
                 if let Some(file_name) = entry.path().file_stem() {
                     let app_name = file_name.to_string_lossy().to_string();
-                    // For simplicity, we'll use the file name as the executable name
-                    // In a real implementation, you'd want to resolve the shortcut target
-                    let exe_name = app_name.to_lowercase().replace(" ", "");
-                    
-                    apps.push(AppInfo {
-                        name: app_name.clone(),
-                        exe_path: entry.path().to_string_lossy().to_string(),
-                        exe_name,
-                        aliases: vec![app_name.to_lowercase()],
-                    });
+
+                    // Resolve the shortcut target
+                    if let Ok(link) = ShellLink::open(&entry.path()) {
+                        if let Some(link_info) = link.link_info() {
+                            if let Some(local_path) = link_info.local_base_path() {
+                                let target_path = Path::new(local_path);
+                                if target_path.exists() {
+                                    let target_str = local_path.to_string();
+                                    let exe_name = app_name.to_lowercase().replace(" ", "");
+                                    apps.push(AppInfo {
+                                        name: app_name.clone(),
+                                        exe_path: target_str,
+                                        exe_name,
+                                        aliases: vec![app_name.to_lowercase()],
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
-    
+
     Ok(apps)
 }
 

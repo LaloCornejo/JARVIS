@@ -676,16 +676,19 @@ class JarvisApp(App):
             log.error(f"check_services FAILED: {e}", exc_info=True)
 
     async def _stream_conversation_updates(self) -> None:
-        """Stream conversation updates to the UI"""
+        """Stream conversation updates to the UI (primarily for assistant responses)"""
         try:
             async for update in streaming_interface.get_conversation_updates():
                 if "role" in update and "content" in update:
-                    # Use call_later to ensure UI updates happen on the main thread
-                    self.call_later(
-                        lambda content=update["content"], role=update["role"]: self.add_message(
-                            content, role
+                    # Only handle assistant messages from streaming to avoid duplicates
+                    # User messages are handled directly in process_message()
+                    if update["role"] == "assistant":
+                        # Use call_later to ensure UI updates happen on the main thread
+                        self.call_later(
+                            lambda content=update["content"], role=update["role"]: self.add_message(
+                                content, role
+                            )
                         )
-                    )
         except Exception as e:
             log.error("Conversation streaming error: %s", e)
 
@@ -921,6 +924,9 @@ class JarvisApp(App):
 
     @work(exclusive=True)
     async def process_message(self, user_input: str) -> None:
+        # Add user message to chat (for text input)
+        self.add_message(user_input, "user")
+
         # Push user message to streaming interface
         await streaming_interface.push_user_message(user_input)
 
@@ -1038,11 +1044,10 @@ class JarvisApp(App):
                 )
 
         streaming_bubble.finish()
-        # Remove the streaming bubble and add the final message
+        # Remove the streaming bubble and add the final message via streaming interface
         self.call_later(streaming_bubble.remove)
-        self.add_message(full_response, "assistant")
         self.messages.append({"role": "assistant", "content": full_response})
-        # Push final response to streaming interface
+        # Push final response to streaming interface (will trigger add_message via listener)
         await streaming_interface.push_assistant_message(full_response)
         await conversation_buffer.add_message({"role": "assistant", "content": full_response})
 

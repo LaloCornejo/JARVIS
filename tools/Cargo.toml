@@ -16,6 +16,7 @@ lazy_static = "1.4"
 glob = "0.3"
 winreg = "0.52"
 walkdir = "2.5"
+lnk = "0.5"
 
 [[bin]]
 name = "get_time"

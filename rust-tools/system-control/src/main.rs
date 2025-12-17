@@ -1,5 +1,5 @@
 use std::env;
-use system_control::{lock_computer, sleep_computer, shutdown_computer, restart_computer, turn_off_monitor, set_volume, volume_up, volume_down, toggle_mute};
+use system_control::{lock_computer, sleep_computer, shutdown_computer, restart_computer, turn_off_monitor, set_volume, volume_up, volume_down, toggle_mute, lower_all_app_volumes, restore_app_volumes};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -63,6 +63,22 @@ fn main() {
                 }
             }
         },
+        "lower_app_volumes" => {
+            match lower_all_app_volumes() {
+                Ok(data) => ToolResult::success(&data),
+                Err(e) => ToolResult::error(&e),
+            }
+        },
+        "restore_app_volumes" => {
+            if args.len() < 3 {
+                ToolResult::error("Usage: system-control restore_app_volumes <json_data>")
+            } else {
+                match restore_app_volumes(&args[2]) {
+                    Ok(()) => ToolResult::success("App volumes restored"),
+                    Err(e) => ToolResult::error(&e),
+                }
+            }
+        },
         "help" | "-h" | "--help" => {
             print_usage();
             return;
@@ -92,6 +108,8 @@ fn print_usage() {
     eprintln!("  volume_down      Decrease system volume by 10%");
     eprintln!("  mute             Toggle mute state");
     eprintln!("  set_volume <0-100> Set volume to specific level");
+    eprintln!("  lower_app_volumes Lower all app volumes to 10%");
+    eprintln!("  restore_app_volumes <json> Restore app volumes from JSON");
     eprintln!("  help             Show this help message");
 }
 

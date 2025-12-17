@@ -20,13 +20,15 @@ class SystemVolumeControlTool(BaseTool):
             return ToolResult(
                 success=False,
                 data=None,
-                error="System control tool not found. Please build it first with 'cargo build --release'"
+                error="System control tool not found. Please build it first with 'cargo build --release'",
             )
 
         try:
+            # Split the command into arguments
+            args = command.split()
             process = await asyncio.create_subprocess_exec(
                 str(self.system_control_exe),
-                command,
+                *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -107,3 +109,36 @@ class SetVolumeTool(SystemVolumeControlTool):
 
     async def execute(self, level: int) -> ToolResult:
         return await self._run_system_control(f"set_volume {level}")
+
+
+class LowerAppVolumesTool(SystemVolumeControlTool):
+    name = "lower_app_volumes"
+    description = "Lower all application volumes to 10% and return their original volumes"
+    parameters = {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    }
+
+    async def execute(self) -> ToolResult:
+        return await self._run_system_control("lower_app_volumes")
+
+
+class RestoreAppVolumesTool(SystemVolumeControlTool):
+    name = "restore_app_volumes"
+    description = "Restore application volumes from JSON data"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "volume_data": {
+                "type": "string",
+                "description": "JSON string containing original volume data",
+            },
+        },
+        "required": ["volume_data"],
+    }
+
+    async def execute(self, volume_data: str) -> ToolResult:
+        # Escape quotes in the JSON data for command line
+        escaped_data = volume_data.replace('"', '\\"')
+        return await self._run_system_control(f'restore_app_volumes "{escaped_data}"')

@@ -78,6 +78,18 @@ class TextToSpeech:
 
     async def play_stream(self, text: str, language: str | None = None) -> None:
         import sounddevice as sd
+        from tools.system.volume_control import LowerAppVolumesTool, RestoreAppVolumesTool
+
+        # Lower all app volumes before playing TTS (but keep TTS at 100%)
+        lower_tool = LowerAppVolumesTool()
+        lower_result = await lower_tool.execute()
+        original_volumes = lower_result.data.get("stdout", "{}") if lower_result.success else "{}"
+
+        # Ensure TTS (python) volume is set to 100%
+        from tools.system.volume_control import SetVolumeTool
+
+        set_volume_tool = SetVolumeTool()
+        await set_volume_tool.execute(level=100)
 
         stream = sd.OutputStream(
             samplerate=self.sample_rate,
@@ -95,6 +107,11 @@ class TextToSpeech:
             stream.stop()
             stream.close()
 
+            # Restore original app volumes after TTS finishes
+            if original_volumes != "{}":
+                restore_tool = RestoreAppVolumesTool()
+                await restore_tool.execute(original_volumes)
+
     async def play_stream_interruptible(
         self,
         text: str,
@@ -102,8 +119,21 @@ class TextToSpeech:
         language: str | None = None,
     ) -> None:
         import sounddevice as sd
+        from tools.system.volume_control import LowerAppVolumesTool, RestoreAppVolumesTool
 
         log.info("Starting interruptible playback")
+
+        # Lower all app volumes before playing TTS (but keep TTS at 100%)
+        lower_tool = LowerAppVolumesTool()
+        lower_result = await lower_tool.execute()
+        original_volumes = lower_result.data.get("stdout", "{}") if lower_result.success else "{}"
+
+        # Ensure TTS (python) volume is set to 100%
+        from tools.system.volume_control import SetVolumeTool
+
+        set_volume_tool = SetVolumeTool()
+        await set_volume_tool.execute(level=100)
+
         stream = sd.OutputStream(
             samplerate=self.sample_rate,
             channels=1,
@@ -123,6 +153,11 @@ class TextToSpeech:
         finally:
             stream.stop()
             stream.close()
+
+            # Restore original app volumes after TTS finishes
+            if original_volumes != "{}":
+                restore_tool = RestoreAppVolumesTool()
+                await restore_tool.execute(original_volumes)
 
     async def get_speakers(self) -> list[dict]:
         client = await self._get_client()
