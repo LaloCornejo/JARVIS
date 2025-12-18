@@ -17,6 +17,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from rich.console import Console
+from rich.logging import RichHandler
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
@@ -25,6 +27,7 @@ from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.logging import TextualHandler
 from textual.message import Message
 from textual.reactive import reactive
+
 from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
@@ -78,27 +81,42 @@ class WakeWordDetected(Message):
 
 
 class StreamingChunk(Message):
-    def __init__(self, text: str, done: bool = False) -> None:
+    def __init__(self, content: str):
         super().__init__()
-        self.text = text
-        self.done = done
+        self.content = content
 
 
-class HoloBorder(Static):
-    def __init__(self, title: str = "", **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.title = title
+class VoiceInitialized(Message):
+    pass
 
     def render(self) -> Text:
-        w = self.size.width
-        if w < 4:
-            return Text("")
-        if self.title:
-            mid = (w - len(self.title) - 4) // 2
-            line = "─" * mid + f"  {self.title}  " + "─" * (w - mid - len(self.title) - 4)
+        text = Text()
+        if self.role == "user":
+            text.append("Laelo\n", style="bold #66aaff")
+            text.append(f"{self.content}\n", style="#cccccc")
         else:
-            line = "─" * w
-        return Text(line, style="#3a3a3a")
+            text.append("AI\n", style="bold #44aa99")
+            for line in self.content.split("\n"):
+                text.append(f"{line}\n", style="#aaaaaa")
+        return text
+
+
+class MessageBubble(Static):
+    def __init__(self, content: str, role: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.content = content
+        self.role = role
+
+    def render(self) -> Text:
+        text = Text()
+        if self.role == "user":
+            text.append("Laelo\n", style="bold #66aaff")
+            text.append(f"{self.content}\n", style="#cccccc")
+        else:
+            text.append("AI\n", style="bold #44aa99")
+            for line in self.content.split("\n"):
+                text.append(f"{line}\n", style="#aaaaaa")
+        return text
 
 
 class SystemStatus(Static):
@@ -121,6 +139,11 @@ class SystemStatus(Static):
         key = name_map.get(name.upper(), name)
         if key in self.services:
             self.services[key] = status
+            # Log the status change
+            import logging
+
+            log = logging.getLogger("jarvis")
+            log.info(f"Service {key} status updated to {'online' if status else 'offline'}")
             self.refresh()
 
     def set_model(self, model: str) -> None:
@@ -161,15 +184,49 @@ class SystemStatus(Static):
         return text
 
 
-class Waveform(Static):
-    active = reactive(False)
-
+class CoreDisplay(Static):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
+        self.status = "ONLINE"
+
+    def set_status(self, status: str) -> None:
+        self.status = status.upper()
+        self.refresh()
+
+    def render(self) -> Text:
+        text = Text()
+        title = "J.A.R.V.I.S"
+        status = self.status
+
+        # Create a centered display
+        width = self.size.width if hasattr(self, "size") and self.size.width > 0 else 30
+        height = self.size.height if hasattr(self, "size") and self.size.height > 0 else 10
+
+        # Title
+        title_pad = (width - len(title)) // 2
+        text.append(" " * title_pad + title + "\n", style="bold #44aa99")
+
+        # Status
+        status_pad = (width - len(status)) // 2
+        status_color = {
+            "ONLINE": "#44aa99",
+            "THINKING": "#ffaa44",
+            "SPEAKING": "#66aaff",
+            "OFFLINE": "#666666",
+        }.get(status, "#666666")
+        text.append(" " * status_pad + status + "\n", style=f"bold {status_color}")
+
+        return text
+
+
+class Waveform(Static):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.active = False
         self._heights = [0] * 24
 
     def on_mount(self) -> None:
-        self.set_interval(0.1, self._animate)
+        self.set_interval(0.5, self._animate)
 
     def _animate(self) -> None:
         if self.active:
@@ -183,61 +240,6 @@ class Waveform(Static):
         wave = "".join(chars[min(h, 6)] for h in self._heights)
         color = "#44aa99" if self.active else "#333333"
         return Text(f"  {wave}", style=color)
-
-
-class CoreDisplay(Static):
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self._frame = 0
-        self._status = "Online"
-
-    def on_mount(self) -> None:
-        self.set_interval(1.0, self._tick)
-
-    def _tick(self) -> None:
-        self._frame += 1
-        self.refresh()
-
-    def set_status(self, status: str) -> None:
-        self._status = status.capitalize()
-        self.refresh()
-
-    def render(self) -> Text:
-        text = Text()
-
-        text.append("╭─ J.A.R.V.I.S ─╮\n", style="#666666")
-        text.append("│               │\n", style="#666666")
-
-        status_colors = {"Online": "#44aa99", "Thinking": "#ffaa44", "Speaking": "#66aaff"}
-        color = status_colors.get(self._status, "#666666")
-        status_padded = f"{self._status:^13}"
-        text.append(f"│{status_padded}│\n", style=color)
-
-        text.append("│               │\n", style="#666666")
-        time_str = datetime.now().strftime("%H:%M:%S")
-        time_padded = f"{time_str:^13}"
-        text.append(f"│{time_padded}│\n", style="#888888")
-        text.append("╰───────────────╯", style="#666666")
-
-        return text
-
-
-class MessageBubble(Static):
-    def __init__(self, content: str, role: str = "user", **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.content = content
-        self.role = role
-
-    def render(self) -> Text:
-        text = Text()
-        if self.role == "user":
-            text.append("Laelo\n", style="bold #66aaff")
-            text.append(f"{self.content}\n", style="#cccccc")
-        else:
-            text.append("AI\n", style="bold #44aa99")
-            for line in self.content.split("\n"):
-                text.append(f"{line}\n", style="#aaaaaa")
-        return text
 
 
 class StreamingBubble(Static):
@@ -350,6 +352,201 @@ class ToolActivity(Static):
         return text
 
 
+class HoloBorder(Static):
+    def __init__(self, title: str = "", **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.title = title
+
+    def render(self) -> Text:
+        w = self.size.width
+        if w < 4:
+            return Text("")
+        if self.title:
+            mid = (w - len(self.title) - 4) // 2
+            line = "─" * mid + f"  {self.title}  " + "─" * (w - mid - len(self.title) - 4)
+        else:
+            line = "─" * w
+        return Text(line, style="#44aa99")
+
+
+class ScreenshotOverlay(Static):
+    """Overlay widget for displaying screenshots during analysis"""
+
+    def __init__(self, screenshot_path: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.screenshot_path = screenshot_path
+        self.styles.width = "80%"
+        self.styles.height = "80%"
+        self.styles.background = "#0f0f0f"  # Solid dark background
+        self.styles.border = ("solid", "#44aa99")
+        self.styles.padding = 2
+        self.styles.layer = "overlay"  # Put it on overlay layer
+
+    def on_unmount(self) -> None:
+        """Clean up when the overlay is removed"""
+        # Ensure we don't leave any rendering artifacts
+        pass
+
+    def _image_to_ascii(self, image_path: str, width: int = 50) -> list[str]:
+        """Convert image to ASCII art"""
+        try:
+            from PIL import Image
+
+            # Open and convert image to grayscale
+            img = Image.open(image_path)
+            # Calculate height maintaining aspect ratio (roughly)
+            aspect_ratio = img.height / img.width
+            height = int(
+                width * aspect_ratio * 0.5
+            )  # 0.5 to account for terminal character aspect ratio
+
+            # Resize image
+            img = img.resize((width, height)).convert("L")  # Convert to grayscale
+
+            # Define ASCII characters from darkest to lightest
+            ascii_chars = " .:-=+*#%@"
+
+            # Convert pixels to ASCII
+            ascii_lines = []
+            for y in range(height):
+                line = ""
+                for x in range(width):
+                    pixel_value = img.getpixel((x, y))
+                    # Map pixel value (0-255) to ASCII character index
+                    char_index = int(pixel_value / 255 * (len(ascii_chars) - 1))
+                    line += ascii_chars[char_index]
+                ascii_lines.append(line)
+
+            img.close()
+            return ascii_lines
+        except Exception as e:
+            return [f"ASCII preview error: {str(e)}"]
+
+    def render(self) -> Text:
+        """Render the overlay content"""
+        try:
+            # Handle case where size is not yet determined
+            if not hasattr(self, "size") or self.size.width == 0 or self.size.height == 0:
+                return Text("Loading overlay...", style="#44aa99")
+        except (AttributeError, ValueError, TypeError):
+            # Size not available yet or any other error
+            return Text("Loading overlay...", style="#44aa99")
+
+        text = Text()
+
+        # Check if this is a test screenshot (no analysis) or actual analysis
+        is_test_screenshot = "analysis" not in self.screenshot_path.lower()
+
+        # For test screenshots, try to get image info and ASCII preview
+        image_info = []
+        ascii_preview = []
+        if is_test_screenshot:
+            try:
+                from PIL import Image
+
+                img = Image.open(self.screenshot_path)
+                image_info = [
+                    f"Size: {img.width}x{img.height}",
+                    f"Format: {img.format}",
+                    f"Mode: {img.mode}",
+                ]
+                img.close()
+
+                # Generate ASCII preview with limited size
+                preview_width = min(40, self.size.width - 10)
+                if preview_width > 10:
+                    ascii_preview = self._image_to_ascii(self.screenshot_path, preview_width)
+                    # Limit preview height to avoid overwhelming the display
+                    ascii_preview = ascii_preview[:15]
+            except Exception as e:
+                image_info = [f"Error loading image info: {str(e)}"]
+
+        # Create a centered box with the content
+        if is_test_screenshot:
+            content_lines = [
+                "🖼️ SCREENSHOT CAPTURED",
+                "",
+                f"Path: {self.screenshot_path}",
+                "",
+            ] + image_info
+
+            # Add ASCII preview if available
+            if ascii_preview:
+                content_lines.extend(["", "Preview:"])
+                content_lines.extend(ascii_preview)
+
+            content_lines.extend(
+                [
+                    "",
+                    "[ESC] Close Preview",
+                ]
+            )
+        else:
+            content_lines = [
+                "🖼️ SCREENSHOT ANALYSIS IN PROGRESS",
+                "",
+                "Image captured and being analyzed...",
+                "",
+                "Please wait for AI analysis to complete.",
+                "This may take a few seconds...",
+                "",
+                "[ESC] Cancel Analysis",
+            ]
+
+        # Calculate centering
+        width = self.size.width
+        height = self.size.height
+
+        # Create the overlay box
+        box_width = min(width - 4, 60)
+        box_height = min(len(content_lines) + 2, height - 2)  # Don't exceed screen height
+
+        # Center the box
+        start_row = max(0, (height - box_height) // 2)
+        start_col = max(0, (width - box_width) // 2)
+
+        # Fill with background
+        for row in range(height):
+            if row >= start_row and row < start_row + box_height:
+                if row == start_row:
+                    # Top border
+                    line = "─" * box_width
+                    text.append(f"{'':<{start_col}}┌{line}┐\n", style="#44aa99")
+                elif row == start_row + box_height - 1:
+                    # Bottom border
+                    line = "─" * box_width
+                    text.append(f"{'':<{start_col}}└{line}┘\n", style="#44aa99")
+                else:
+                    # Content or side borders
+                    content_idx = row - start_row - 1
+                    if content_idx < len(content_lines):
+                        content = content_lines[content_idx]
+                        padded_content = f" {content:<{box_width - 2}} "
+                        if "SCREENSHOT" in content:
+                            text.append(
+                                f"{'':<{start_col}}│{padded_content}│\n", style="bold #44aa99"
+                            )
+                        elif (
+                            "Displaying" in content
+                            or "Please wait" in content
+                            or "This may" in content
+                            or "Preview:" in content
+                        ):
+                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#888888")
+                        elif "Path:" in content or "Size:" in content or "Format:" in content:
+                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#cccccc")
+                        else:
+                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#cccccc")
+                    else:
+                        # Empty content line
+                        text.append(f"{'':<{start_col}}│{'':<{box_width}}│\n", style="#0f0f0f")
+            else:
+                # Empty line with background
+                text.append(f"{'':<{width}}\n", style="#0f0f0f")
+
+        return text
+
+
 class PerformanceStats(Static):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -381,198 +578,196 @@ class PerformanceStats(Static):
             pass
 
     def render(self) -> Text:
-        text = Text()
+        try:
+            text = Text()
 
-        if not self._stats_cache:
-            text.append("  Stats loading...\n", style="#666666")
-            text.append("  Please wait for\n", style="#666666")
-            text.append("  performance data\n", style="#666666")
-            return text
+            if not self._stats_cache:
+                text.append("  Stats loading...\n", style="#666666")
+                text.append("  Please wait for\n", style="#666666")
+                text.append("  performance data\n", style="#666666")
+                return text
 
-        if self._stats_cache.get("error"):
-            text.append("  Stats unavailable\n", style="#aa4444")
-            text.append("  Check system status\n", style="#aa4444")
-            return text
+            # Show ALL comprehensive metrics in detailed format
+            stats = self._stats_cache
 
-        # Show ALL comprehensive metrics in detailed format
-        stats = self._stats_cache
+            # Header
+            text.append("═══ PERFORMANCE ═══\n", style="#888888")
 
-        # Header
-        text.append("═══ PERFORMANCE ═══\n", style="#888888")
+            # Quick Health Summary
+            health_indicators = []
 
-        # Quick Health Summary
-        health_indicators = []
-
-        # Overall response health
-        ui_stats = stats.get("ui_response_time", {})
-        if ui_stats and ui_stats.get("samples", 0) > 0:
-            ui_mean = ui_stats.get("recent_mean", 0)
-            if ui_mean < 100:
-                health_indicators.append("UI:✓")
-            elif ui_mean < 500:
-                health_indicators.append("UI:~")
-            else:
-                health_indicators.append("UI:✗")
-
-        # Cache health
-        cache_stats = stats.get("cache_hit_rate", {})
-        if cache_stats and cache_stats.get("samples", 0) > 0:
-            hit_rate = cache_stats.get("recent_mean", 0) * 100
-            if hit_rate > 50:
-                health_indicators.append(f"Cache:{hit_rate:.0f}%✓")
-            else:
-                health_indicators.append(f"Cache:{hit_rate:.0f}%")
-
-        # Memory health
-        memory_stats = stats.get("memory_usage", {})
-        if memory_stats and memory_stats.get("samples", 0) > 0:
-            memory_mb = memory_stats.get("current", 0)
-            if memory_mb < 500:
-                health_indicators.append(f"Mem:{memory_mb:.0f}MB✓")
-            else:
-                health_indicators.append(f"Mem:{memory_mb:.0f}MB")
-
-        if health_indicators:
-            text.append("  " + " ".join(health_indicators) + "\n", style="#44aa99")
-            text.append("───────────────────\n", style="#666666")
-
-        # Response Times Section
-        response_count = 0
-        ui_stats = stats.get("ui_response_time", {})
-        llm_stats = stats.get("llm_response_time", {})
-        first_token_stats = stats.get("llm_first_token_time", {})
-        token_stats = stats.get("llm_token_rate", {})
-        tts_stats = stats.get("tts_start_time", {})
-        stt_stats = stats.get("stt_recognition_time", {})
-
-        if (
-            (ui_stats and ui_stats.get("samples", 0) > 0)
-            or (llm_stats and llm_stats.get("samples", 0) > 0)
-            or (first_token_stats and first_token_stats.get("samples", 0) > 0)
-            or (token_stats and token_stats.get("samples", 0) > 0)
-            or (tts_stats and tts_stats.get("samples", 0) > 0)
-            or (stt_stats and stt_stats.get("samples", 0) > 0)
-        ):
-            text.append("Response Times:\n", style="#66aaff")
-
-            # UI Response Time
+            # Overall response health
+            ui_stats = stats.get("ui_response_time", {})
             if ui_stats and ui_stats.get("samples", 0) > 0:
                 ui_mean = ui_stats.get("recent_mean", 0)
-                ui_current = ui_stats.get("current", 0)
-                text.append(f"  UI: {ui_current:.1f}ms ({ui_mean:.1f}ms avg)\n", style="#66aaff")
-                response_count += 1
+                if ui_mean < 100:
+                    health_indicators.append("UI:✓")
+                elif ui_mean < 500:
+                    health_indicators.append("UI:~")
+                else:
+                    health_indicators.append("UI:✗")
 
-            # LLM Response Time
-            if llm_stats and llm_stats.get("samples", 0) > 0:
-                llm_mean = llm_stats.get("recent_mean", 0)
-                llm_current = llm_stats.get("current", 0)
-                text.append(f"  LLM: {llm_current:.1f}ms ({llm_mean:.1f}ms avg)\n", style="#44aa99")
-                response_count += 1
-
-            # LLM First Token Time
-            if first_token_stats and first_token_stats.get("samples", 0) > 0:
-                ft_mean = first_token_stats.get("recent_mean", 0)
-                text.append(f"  First Token: {ft_mean:.1f}ms\n", style="#44aa99")
-                response_count += 1
-
-            # LLM Token Rate
-            if token_stats and token_stats.get("samples", 0) > 0:
-                token_rate = token_stats.get("recent_mean", 0)
-                text.append(f"  Token Rate: {token_rate:.1f} t/s\n", style="#44aa99")
-                response_count += 1
-
-            # TTS Response Time
-            if tts_stats and tts_stats.get("samples", 0) > 0:
-                tts_mean = tts_stats.get("recent_mean", 0)
-                # Filter out obviously wrong TTS times (timestamps)
-                if tts_mean < 10000:  # Less than 10 seconds
-                    text.append(f"  TTS: {tts_mean:.1f}ms avg\n", style="#ffaa44")
-                    response_count += 1
-
-            # STT Recognition Time
-            if stt_stats and stt_stats.get("samples", 0) > 0:
-                stt_mean = stt_stats.get("recent_mean", 0)
-                text.append(f"  STT: {stt_mean:.1f}ms avg\n", style="#ffaa44")
-                response_count += 1
-
-        # Tool Performance Section
-        tool_stats = stats.get("tool_execution_time", {})
-        tool_count_stats = stats.get("tool_usage_count", {})
-        cache_stats = stats.get("cache_hit_rate", {})
-
-        if (
-            (tool_stats and tool_stats.get("samples", 0) > 0)
-            or (tool_count_stats and tool_count_stats.get("samples", 0) > 0)
-            or (cache_stats and cache_stats.get("samples", 0) > 0)
-        ):
-            text.append("Tool Performance:\n", style="#44aa99")
-
-            # Tool Execution Time
-            if tool_stats and tool_stats.get("samples", 0) > 0:
-                tool_mean = tool_stats.get("recent_mean", 0)
-                tool_current = tool_stats.get("current", 0)
-                text.append(
-                    f"  Exec: {tool_current:.1f}ms ({tool_mean:.1f}ms avg)\n", style="#44aa99"
-                )
-
-            # Tool Usage Count
-            if tool_count_stats and tool_count_stats.get("samples", 0) > 0:
-                total_calls = tool_count_stats.get("samples", 0)
-                text.append(f"  Calls: {total_calls}\n", style="#44aa99")
-
-            # Cache Performance
+            # Cache health
+            cache_stats = stats.get("cache_hit_rate", {})
             if cache_stats and cache_stats.get("samples", 0) > 0:
                 hit_rate = cache_stats.get("recent_mean", 0) * 100
-                text.append(f"  Cache: {hit_rate:.1f}% hit rate\n", style="#44aa99")
+                if hit_rate > 50:
+                    health_indicators.append(f"Cache:{hit_rate:.0f}%✓")
+                else:
+                    health_indicators.append(f"Cache:{hit_rate:.0f}%")
 
-        # System Resources Section
-        memory_stats = stats.get("memory_usage", {})
-        cpu_stats = stats.get("cpu_usage", {})
-
-        if (memory_stats and memory_stats.get("samples", 0) > 0) or (
-            cpu_stats and cpu_stats.get("samples", 0) > 0
-        ):
-            text.append("System Resources:\n", style="#ffaa44")
-
-            # Memory Usage
+            # Memory health
+            memory_stats = stats.get("memory_usage", {})
             if memory_stats and memory_stats.get("samples", 0) > 0:
                 memory_mb = memory_stats.get("current", 0)
-                text.append(f"  Memory: {memory_mb:.1f}MB\n", style="#ffaa44")
+                if memory_mb < 500:
+                    health_indicators.append(f"Mem:{memory_mb:.0f}MB✓")
+                else:
+                    health_indicators.append(f"Mem:{memory_mb:.0f}MB")
 
-            # CPU Usage
-            if cpu_stats and cpu_stats.get("samples", 0) > 0:
-                cpu_percent = cpu_stats.get("current", 0)
-                text.append(f"  CPU: {cpu_percent:.1f}%\n", style="#ffaa44")
+            if health_indicators:
+                text.append("  " + " ".join(health_indicators) + "\n", style="#44aa99")
+                text.append("───────────────────\n", style="#666666")
 
-        # Network Section
-        network_stats = stats.get("network_latency", {})
+            # Response Times Section
+            ui_stats = stats.get("ui_response_time", {})
+            llm_stats = stats.get("llm_response_time", {})
+            first_token_stats = stats.get("llm_first_token_time", {})
+            token_stats = stats.get("llm_token_rate", {})
+            tts_stats = stats.get("tts_start_time", {})
+            stt_stats = stats.get("stt_recognition_time", {})
 
-        if network_stats and network_stats.get("samples", 0) > 0:
-            text.append("Network:\n", style="#aa44ff")
+            if (
+                (ui_stats and ui_stats.get("samples", 0) > 0)
+                or (llm_stats and llm_stats.get("samples", 0) > 0)
+                or (first_token_stats and first_token_stats.get("samples", 0) > 0)
+                or (token_stats and token_stats.get("samples", 0) > 0)
+                or (tts_stats and tts_stats.get("samples", 0) > 0)
+                or (stt_stats and stt_stats.get("samples", 0) > 0)
+            ):
+                text.append("Response Times:\n", style="#66aaff")
 
-            # Network Latency
-            net_mean = network_stats.get("recent_mean", 0)
-            net_current = network_stats.get("current", 0)
-            text.append(f"  Latency: {net_current:.1f}ms ({net_mean:.1f}ms avg)\n", style="#aa44ff")
+                # UI Response Time
+                if ui_stats and ui_stats.get("samples", 0) > 0:
+                    ui_mean = ui_stats.get("recent_mean", 0)
+                    ui_current = ui_stats.get("current", 0)
+                    text.append(
+                        f"  UI: {ui_current:.1f}ms ({ui_mean:.1f}ms avg)\n", style="#66aaff"
+                    )
 
-        # Uptime
-        uptime_seconds = stats.get("uptime_seconds", 0)
-        if uptime_seconds > 0:
-            hours = int(uptime_seconds // 3600)
-            minutes = int((uptime_seconds % 3600) // 60)
-            seconds = int(uptime_seconds % 60)
-            if hours > 0:
-                uptime_str = f"{hours}h {minutes}m {seconds}s"
-            elif minutes > 0:
-                uptime_str = f"{minutes}m {seconds}s"
-            else:
-                uptime_str = f"{seconds}s"
-            text.append(f"  Uptime: {uptime_str}\n", style="#888888")
+                # LLM Response Time
+                if llm_stats and llm_stats.get("samples", 0) > 0:
+                    llm_mean = llm_stats.get("recent_mean", 0)
+                    llm_current = llm_stats.get("current", 0)
+                    text.append(
+                        f"  LLM: {llm_current:.1f}ms ({llm_mean:.1f}ms avg)\n", style="#44aa99"
+                    )
 
-        # Footer
-        text.append("═══════════════════", style="#666666")
+                # LLM First Token Time
+                if first_token_stats and first_token_stats.get("samples", 0) > 0:
+                    ft_mean = first_token_stats.get("recent_mean", 0)
+                    text.append(f"  First Token: {ft_mean:.1f}ms\n", style="#44aa99")
 
-        return text
+                # LLM Token Rate
+                if token_stats and token_stats.get("samples", 0) > 0:
+                    token_rate = token_stats.get("recent_mean", 0)
+                    text.append(f"  Token Rate: {token_rate:.1f} t/s\n", style="#44aa99")
+
+                # TTS Response Time
+                if tts_stats and tts_stats.get("samples", 0) > 0:
+                    tts_mean = tts_stats.get("recent_mean", 0)
+                    # Filter out obviously wrong TTS times (timestamps)
+                    if tts_mean < 10000:  # Less than 10 seconds
+                        text.append(f"  TTS: {tts_mean:.1f}ms avg\n", style="#ffaa44")
+
+                # STT Recognition Time
+                if stt_stats and stt_stats.get("samples", 0) > 0:
+                    stt_mean = stt_stats.get("recent_mean", 0)
+                    text.append(f"  STT: {stt_mean:.1f}ms avg\n", style="#ffaa44")
+
+            # Tool Performance Section
+            tool_stats = stats.get("tool_execution_time", {})
+            tool_count_stats = stats.get("tool_usage_count", {})
+            cache_stats = stats.get("cache_hit_rate", {})
+
+            if (
+                (tool_stats and tool_stats.get("samples", 0) > 0)
+                or (tool_count_stats and tool_count_stats.get("samples", 0) > 0)
+                or (cache_stats and cache_stats.get("samples", 0) > 0)
+            ):
+                text.append("Tool Performance:\n", style="#44aa99")
+
+                # Tool Execution Time
+                if tool_stats and tool_stats.get("samples", 0) > 0:
+                    tool_mean = tool_stats.get("recent_mean", 0)
+                    tool_current = tool_stats.get("current", 0)
+                    text.append(
+                        f"  Exec: {tool_current:.1f}ms ({tool_mean:.1f}ms avg)\n", style="#44aa99"
+                    )
+
+                # Tool Usage Count
+                if tool_count_stats and tool_count_stats.get("samples", 0) > 0:
+                    total_calls = tool_count_stats.get("samples", 0)
+                    text.append(f"  Calls: {total_calls}\n", style="#44aa99")
+
+                # Cache Performance
+                if cache_stats and cache_stats.get("samples", 0) > 0:
+                    hit_rate = cache_stats.get("recent_mean", 0) * 100
+                    text.append(f"  Cache: {hit_rate:.1f}% hit rate\n", style="#44aa99")
+
+            # System Resources Section
+            memory_stats = stats.get("memory_usage", {})
+            cpu_stats = stats.get("cpu_usage", {})
+
+            if (memory_stats and memory_stats.get("samples", 0) > 0) or (
+                cpu_stats and cpu_stats.get("samples", 0) > 0
+            ):
+                text.append("System Resources:\n", style="#ffaa44")
+
+                # Memory Usage
+                if memory_stats and memory_stats.get("samples", 0) > 0:
+                    memory_mb = memory_stats.get("current", 0)
+                    text.append(f"  Memory: {memory_mb:.1f}MB\n", style="#ffaa44")
+
+                # CPU Usage
+                if cpu_stats and cpu_stats.get("samples", 0) > 0:
+                    cpu_percent = cpu_stats.get("current", 0)
+                    text.append(f"  CPU: {cpu_percent:.1f}%\n", style="#ffaa44")
+
+            # Network Section
+            network_stats = stats.get("network_latency", {})
+
+            if network_stats and network_stats.get("samples", 0) > 0:
+                text.append("Network:\n", style="#aa44ff")
+
+                # Network Latency
+                net_mean = network_stats.get("recent_mean", 0)
+                net_current = network_stats.get("current", 0)
+                text.append(
+                    f"  Latency: {net_current:.1f}ms ({net_mean:.1f}ms avg)\n", style="#aa44ff"
+                )
+
+            # Uptime
+            uptime_seconds = stats.get("uptime_seconds", 0)
+            if uptime_seconds > 0:
+                hours = int(uptime_seconds // 3600)
+                minutes = int((uptime_seconds % 3600) // 60)
+                seconds = int(uptime_seconds % 60)
+                if hours > 0:
+                    uptime_str = f"{hours}h {minutes}m {seconds}s"
+                elif minutes > 0:
+                    uptime_str = f"{minutes}m {seconds}s"
+                else:
+                    uptime_str = f"{seconds}s"
+                text.append(f"  Uptime: {uptime_str}\n", style="#888888")
+
+            # Footer
+            text.append("═══════════════════", style="#666666")
+
+            return text
+        except Exception as e:
+            # Return safe fallback if rendering fails
+            return Text("  Stats unavailable", style="#666666")
 
 
 class CommandInput(Input):
@@ -683,247 +878,12 @@ class ThemeSelector(Static):
 
 
 class JarvisApp(App):
-    CSS = """
-    Screen {
-        background: #0a0a0a;
-    }
-
-    #main-container {
-        width: 100%;
-        height: 100%;
-    }
-
-    #left-panel {
-        width: 24;
-        height: 100%;
-        background: #0f0f0f;
-        border-right: solid #1a1a1a;
-    }
-
-    #center-panel {
-        width: 1fr;
-        height: 100%;
-    }
-
-    #right-panel {
-        width: 24;
-        height: 100%;
-        background: #0f0f0f;
-        border-left: solid #1a1a1a;
-    }
-
-    #core-display {
-        height: 14;
-        content-align: center middle;
-        background: #0a0a0a;
-        margin: 1;
-        border: solid #1a1a1a;
-    }
-
-    #waveform {
-        height: 2;
-        margin: 1;
-        content-align: center middle;
-        background: #0a0a0a;
-        border: solid #1a1a1a;
-    }
-
-    #system-status {
-        height: 1fr;
-        margin: 1;
-        background: #0a0a0a;
-        border: solid #1a1a1a;
-        padding: 1;
-    }
-
-    #tool-activity {
-        height: auto;
-        min-height: 6;
-        max-height: 10;
-        background: #0a0a0a;
-        border: solid #1a1a1a;
-        padding: 1;
-        margin: 1;
-    }
-
-    #performance-stats {
-        height: auto;
-        min-height: 16;
-        max-height: 25;
-        background: #0a0a0a;
-        border: solid #1a1a1a;
-        padding: 1;
-        margin: 1;
-    }
-
-    #top-border {
-        height: 1;
-        dock: top;
-        background: #0a0a0a;
-        border-bottom: solid #1a1a1a;
-    }
-
-    #chat-scroll {
-        height: 1fr;
-        margin: 0 1;
-        background: #0a0a0a;
-        scrollbar-color: #333;
-        scrollbar-color-hover: #555;
-        scrollbar-color-active: #777;
-    }
-
-    #input-area {
-        height: auto;
-        dock: bottom;
-        padding: 1;
-        background: #0f0f0f;
-        border-top: solid #1a1a1a;
-        margin: 0 1;
-    }
-
-    #thinking-line {
-        height: 1;
-        margin-bottom: 1;
-        color: #888;
-        background: #0a0a0a;
-        padding: 0 1;
-    }
-
-    CommandInput {
-        border: solid #333;
-        background: #1a1a1a;
-        color: #e0e0e0;
-        padding: 0 1;
-    }
-
-    CommandInput:focus {
-        border: solid #555;
-        background: #1f1f1f;
-    }
-
-    MessageBubble {
-        margin: 1 0;
-        padding: 1;
-        background: #0a0a0a;
-        border: solid #1a1a1a;
-    }
-
-    StreamingBubble {
-        margin: 1 0;
-        padding: 1;
-        background: #0a0a0a;
-        border: solid #1a1a1a;
-    }
-
-    #model-selector {
-        display: none;
-        dock: bottom;
-        height: 20;
-        background: #0f0f0f;
-        border: solid #333;
-        padding: 1;
-        margin: 2;
-    }
-
-    #model-selector.visible {
-        display: block;
-    }
-
-    .panel-title {
-        text-align: center;
-        color: #888;
-        text-style: bold;
-        margin-bottom: 1;
-        background: #0a0a0a;
-        padding: 0 1;
-    }
-
-    #model-list {
-        height: 1fr;
-        background: #0a0a0a;
-        border: solid #1a1a1a;
-    }
-
-    #model-list > .option-list--option-highlighted {
-        background: #1f1f1f;
-        color: #e0e0e0;
-    }
-
-    #notification-area {
-        dock: top;
-        height: auto;
-        max-height: 3;
-        margin: 0 30;
-    }
-
-    .notification {
-        background: #1a1a1a;
-        border: solid #444;
-        padding: 0 1;
-        margin: 0 0 1 0;
-    }
-
-    #command-palette {
-        display: none;
-        height: auto;
-        max-height: 14;
-        background: #0f0f0f;
-        border: solid #333;
-        margin: 0 0 1 0;
-    }
-
-    #command-palette.visible {
-        display: block;
-    }
-
-    #command-list {
-        height: auto;
-        max-height: 12;
-        background: #0a0a0a;
-    }
-
-    #command-list > .option-list--option-highlighted {
-        background: #1f1f1f;
-        color: #e0e0e0;
-    }
-
-    #theme-selector {
-        display: none;
-        dock: bottom;
-        height: 18;
-        background: #0f0f0f;
-        border: solid #333;
-        padding: 1;
-        margin: 2;
-    }
-
-    #theme-selector.visible {
-        display: block;
-    }
-
-    #theme-list {
-        height: 1fr;
-        background: #0a0a0a;
-        border: solid #1a1a1a;
-    }
-
-    #theme-list > .option-list--option-highlighted {
-        background: #1f1f1f;
-        color: #e0e0e0;
-    }
-    """
-
-    BINDINGS = [
-        Binding("ctrl+c", "quit", "Quit"),
-        Binding("ctrl+m", "select_model", "Model"),
-        Binding("ctrl+t", "select_theme", "Theme"),
-        Binding("ctrl+v", "toggle_voice", "Voice"),
-        Binding("escape", "cancel", "Cancel", show=False),
-    ]
+    """J.A.R.V.I.S - AI Assistant TUI Application"""
 
     def __init__(self, debug_mode: bool = False):
         super().__init__()
-        self._debug_mode = debug_mode
+        # Initialize core attributes
+        self._debug_mode = debug_mode  # Set debug_mode from parameter
         self.config = Config("config/settings.yaml")
         self.ollama = OllamaClient(base_url=self.config.ollama_url, model=self.config.llm_model)
         self.router = ModelRouter(
@@ -950,6 +910,248 @@ class JarvisApp(App):
         self._models_loaded = False
         self._streaming_bubble: StreamingBubble | None = None
         self._current_theme = "opencode"
+
+    BINDINGS = [
+        Binding("ctrl+c", "quit", "Quit"),
+        Binding("ctrl+m", "select_model", "Model"),
+        Binding("ctrl+t", "select_theme", "Theme"),
+        Binding("ctrl+v", "toggle_voice", "Voice"),
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    CSS = """
+Screen {
+    background: #0a0a0a;
+}
+
+#main-container {
+    width: 100%;
+    height: 100%;
+}
+
+#left-panel {
+    width: 24;
+    height: 100%;
+    background: #0f0f0f;
+    border-left: solid #1a1a1a;
+}
+
+#center-panel {
+    width: 1fr;
+    height: 100%;
+}
+
+#right-panel {
+    width: 24;
+    height: 100%;
+    background: #0f0f0f;
+    border-left: solid #1a1a1a;
+}
+
+#core-display {
+    height: 14;
+    content-align: center middle;
+    background: #0a0a0a;
+    margin: 1;
+    border: solid #1a1a1a;
+}
+
+#waveform {
+    height: 2;
+    margin: 1;
+    content-align: center middle;
+    background: #0a0a0a;
+    border: solid #1a1a1a;
+}
+
+#system-status {
+    height: 1fr;
+    margin: 1;
+    background: #0a0a0a;
+    border: solid #1a1a1a;
+    padding: 1;
+}
+
+#tool-activity {
+    height: auto;
+    min-height: 8;
+    max-height: 12;
+    background: #0a0a0a;
+    border: solid #1a1a1a;
+    padding: 1;
+    margin: 1;
+}
+
+#performance-stats {
+    height: auto;
+    min-height: 16;
+    max-height: 25;
+    background: #0a0a0a;
+    border: solid #1a1a1a;
+    padding: 1;
+    margin: 1;
+}
+
+#screenshot-overlay {
+    layer: overlay;
+}
+
+#top-border {
+    height: 1;
+    dock: top;
+    background: #0a0a0a;
+    border-bottom: solid #1a1a1a;
+}
+
+#chat-scroll {
+    height: 1fr;
+    margin: 0 1;
+    background: #0a0a0a;
+    scrollbar-color: #333;
+    scrollbar-color-hover: #555;
+    scrollbar-color-active: #777;
+}
+
+#input-area {
+    height: auto;
+    dock: bottom;
+    padding: 1;
+    background: #0f0f0f;
+    border-top: solid #1a1a1a;
+    margin: 0 1;
+}
+
+#thinking-line {
+    height: 1;
+    margin-bottom: 1;
+    color: #888;
+    background: #0a0a0a;
+    padding: 0 1;
+}
+
+CommandInput {
+    border: solid #333;
+    background: #1a1a1a;
+    color: #e0e0e0;
+    padding: 0 1;
+}
+
+CommandInput:focus {
+    border: solid #555;
+    background: #1f1f1f;
+}
+
+MessageBubble {
+    margin: 1 0;
+    padding: 1;
+    background: #0a0a0a;
+    border: solid #1a1a1a;
+}
+
+StreamingBubble {
+    margin: 1 0;
+    padding: 1;
+    background: #0a0a0a;
+    border: solid #1a1a1a;
+}
+
+#model-selector {
+    display: none;
+    dock: bottom;
+    height: 20;
+    background: #0f0f0f;
+    border: solid #333;
+    padding: 1;
+    margin: 2;
+}
+
+#model-selector.visible {
+    display: block;
+}
+
+.panel-title {
+    text-align: center;
+    color: #888;
+    text-style: bold;
+    margin-bottom: 1;
+    background: #0a0a0a;
+    padding: 0 1;
+}
+
+#model-list {
+    height: 1fr;
+    background: #0a0a0a;
+    border: solid #1a1a1a;
+}
+
+#model-list > .option-list--option-highlighted {
+    background: #1f1f1f;
+    color: #e0e0e0;
+}
+
+#notification-area {
+    dock: top;
+    height: auto;
+    max-height: 3;
+    margin: 0 30;
+}
+
+.notification {
+    background: #1a1a1a;
+    border: solid #444;
+    padding: 0 1;
+    margin: 0 0 1 0;
+}
+
+#command-palette {
+    display: none;
+    height: auto;
+    max-height: 14;
+    background: #0f0f0f;
+    border: solid #333;
+    margin: 0 0 1 0;
+}
+
+#command-palette.visible {
+    display: block;
+}
+
+#command-list {
+    height: auto;
+    max-height: 12;
+    background: #0a0a0a;
+}
+
+#command-list > .option-list--option-highlighted {
+    background: #1f1f1f;
+    color: #e0e0e0;
+}
+
+#theme-selector {
+    display: none;
+    dock: bottom;
+    height: 18;
+    background: #0f0f0f;
+    border: solid #333;
+    padding: 1;
+    margin: 2;
+}
+
+#theme-selector.visible {
+    display: block;
+}
+
+#theme-list {
+    height: 1fr;
+    background: #0a0a0a;
+    border: solid #1a1a1a;
+}
+
+#theme-list > .option-list--option-highlighted {
+    background: #1f1f1f;
+    color: #e0e0e0;
+}
+"""
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="main-container"):
@@ -1004,8 +1206,12 @@ class JarvisApp(App):
 
     async def check_services(self) -> None:
         try:
-            log.warning("check_services STARTED")
-            status = self.query_one("#system-status", SystemStatus)
+            log.info("check_services STARTED")
+            try:
+                status = self.query_one("#system-status", SystemStatus)
+            except Exception:
+                log.debug("System status widget not available during service check")
+                return
 
             ollama_ok = False
             tts_ok = False
@@ -1029,7 +1235,7 @@ class JarvisApp(App):
             )
             status.update_service("ollama", ollama_ok)
             status.update_service("tts", tts_ok)
-            log.warning("check_services COMPLETED")
+            log.info("check_services COMPLETED")
 
             if ollama_ok:
                 self.show_notification("Using Ollama backend", "info")
@@ -1072,6 +1278,27 @@ class JarvisApp(App):
         except Exception as e:
             log.error("Transcription streaming error: %s", e)
 
+    def _show_screenshot_overlay(self, screenshot_path: str) -> None:
+        """Show screenshot overlay with the given image path"""
+        try:
+            # Remove any existing overlay
+            self._hide_screenshot_overlay()
+
+            # Create and mount the overlay
+            overlay = ScreenshotOverlay(screenshot_path, id="screenshot-overlay")
+            self.mount(overlay)
+        except Exception as e:
+            log.error(f"Error showing screenshot overlay: {e}")
+
+    def _hide_screenshot_overlay(self) -> None:
+        """Hide the screenshot overlay if it exists"""
+        try:
+            overlay = self.query_one("#screenshot-overlay", ScreenshotOverlay)
+            if overlay:
+                overlay.remove()
+        except Exception:
+            pass
+
     async def _stream_tool_activity_updates(self) -> None:
         """Stream tool activity updates to the UI"""
         try:
@@ -1085,10 +1312,21 @@ class JarvisApp(App):
 
                         if status == "started":
                             tool_activity.add_activity(tool_name, "running")
+                            # Check if this is a screenshot analysis tool
+                            if tool_name == "screenshot_analyze":
+                                # Show screenshot overlay if path is provided
+                                if "screenshot_path" in activity:
+                                    self._show_screenshot_overlay(activity["screenshot_path"])
                         elif status == "completed":
                             tool_activity.add_activity(tool_name, "done")
+                            # Hide screenshot overlay if it was showing
+                            if tool_name == "screenshot_analyze":
+                                self._hide_screenshot_overlay()
                         elif status == "failed":
                             tool_activity.add_activity(f"{tool_name} (failed)", "done")
+                            # Hide screenshot overlay on failure too
+                            if tool_name == "screenshot_analyze":
+                                self._hide_screenshot_overlay()
                     except Exception:
                         pass
 
@@ -1098,13 +1336,11 @@ class JarvisApp(App):
             log.error("Tool activity streaming error: %s", e)
 
     async def init_voice(self) -> None:
-        log.info("Initializing voice")
         try:
             self.voice_assistant = VoiceAssistant(
                 debug=self._debug_mode,
                 tools=self.tools,
             )
-            status = self.query_one("#system-status", SystemStatus)
 
             def on_state_change(state: AssistantState) -> None:
                 self.post_message(VoiceStateChanged(state, False))
@@ -1122,7 +1358,19 @@ class JarvisApp(App):
             self.voice_assistant.on_transcription(on_transcription)
             self.voice_assistant.on_partial_transcription(on_partial)
             self.voice_assistant.on_response(on_response)
-            status.update_service("voice", True)
+
+            # Update voice status in UI
+            def update_voice_ui():
+                try:
+                    status = self.query_one("#system-status", SystemStatus)
+                    status.update_service("voice", True)
+                except Exception:
+                    pass
+
+            # Try immediate update and also schedule one for next event loop iteration
+            update_voice_ui()
+            self.call_later(update_voice_ui)
+
             self._voice_task = asyncio.create_task(self.voice_assistant.run())
 
             # Start streaming tasks
@@ -1137,10 +1385,22 @@ class JarvisApp(App):
     def show_notification(self, msg: str, level: str = "info") -> None:
         self.notify(msg, timeout=3)
 
+    def on_voice_initialized(self, event: VoiceInitialized) -> None:
+        """Handle voice initialization completion"""
+        try:
+            status = self.query_one("#system-status", SystemStatus)
+            status.update_service("voice", True)
+        except Exception:
+            pass
+
     def on_voice_state_changed(self, event: VoiceStateChanged) -> None:
-        status = self.query_one("#system-status", SystemStatus)
-        waveform = self.query_one("#waveform", Waveform)
-        core = self.query_one("#core-display", CoreDisplay)
+        try:
+            status = self.query_one("#system-status", SystemStatus)
+            waveform = self.query_one("#waveform", Waveform)
+            core = self.query_one("#core-display", CoreDisplay)
+        except Exception:
+            log.debug("UI widgets not available for voice state update")
+            return
         state_map = {
             AssistantState.IDLE: "IDLE",
             AssistantState.LISTENING: "LISTENING",
@@ -1177,68 +1437,84 @@ class JarvisApp(App):
         """Add a message to the chat display safely."""
         try:
             chat = self.query_one("#chat-scroll", VerticalScroll)
-            # Use call_later to ensure UI updates happen on the main thread
-            self.call_later(lambda: chat.mount(MessageBubble(content, role)))
-            self.call_later(lambda: chat.scroll_end())
+            # Mount synchronously to avoid cleanup issues
+            chat.mount(MessageBubble(content, role))
+            chat.scroll_end()
         except Exception as e:
             log.error(f"Error adding message: {e}")
 
     def on_voice_response(self, event: VoiceResponse) -> None:
         """Handle voice response events."""
         # Add voice assistant responses to the chat display
-        # Use call_later to ensure UI updates happen on the main thread
-        self.call_later(lambda: self.add_message(event.text, "assistant"))
+        self.add_message(event.text, "assistant")
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        palette = self.query_one("#command-palette", CommandPalette)
-        text = event.value
-        if text.startswith("/"):
-            palette.filter_commands(text)
-            palette.add_class("visible")
-        else:
-            palette.remove_class("visible")
+        try:
+            palette = self.query_one("#command-palette", CommandPalette)
+            text = event.value
+            if text.startswith("/"):
+                palette.filter_commands(text)
+                palette.add_class("visible")
+            else:
+                palette.remove_class("visible")
+        except Exception:
+            # Command palette not available
+            pass
 
     def on_key(self, event) -> None:
-        palette = self.query_one("#command-palette", CommandPalette)
-        if "visible" in palette.classes:
-            if event.key == "up":
-                palette.move_selection(-1)
-                event.prevent_default()
-                event.stop()
-            elif event.key == "down":
-                palette.move_selection(1)
-                event.prevent_default()
-                event.stop()
-            elif event.key == "tab":
-                if cmd := palette.get_selected_command():
-                    input_widget = self.query_one(CommandInput)
-                    input_widget.value = f"/{cmd} "
-                    input_widget.cursor_position = len(input_widget.value)
-                palette.remove_class("visible")
-                event.prevent_default()
-                event.stop()
-            elif event.key == "enter":
-                if cmd := palette.get_selected_command():
-                    input_widget = self.query_one(CommandInput)
-                    input_widget.value = ""
+        try:
+            palette = self.query_one("#command-palette", CommandPalette)
+            if "visible" in palette.classes:
+                if event.key == "up":
+                    palette.move_selection(-1)
+                    event.prevent_default()
+                    event.stop()
+                elif event.key == "down":
+                    palette.move_selection(1)
+                    event.prevent_default()
+                    event.stop()
+                elif event.key == "tab":
+                    if cmd := palette.get_selected_command():
+                        input_widget = self.query_one(CommandInput)
+                        input_widget.value = f"/{cmd} "
+                        input_widget.cursor_position = len(input_widget.value)
                     palette.remove_class("visible")
                     event.prevent_default()
                     event.stop()
-                    asyncio.create_task(self.handle_command(f"/{cmd}"))
-            return
+                elif event.key == "enter":
+                    if cmd := palette.get_selected_command():
+                        input_widget = self.query_one(CommandInput)
+                        input_widget.value = ""
+                        palette.remove_class("visible")
+                        event.prevent_default()
+                        event.stop()
+                        asyncio.create_task(self.handle_command(f"/{cmd}"))
+                return
+        except Exception:
+            # Command palette not available
+            pass
 
         # Handle theme selector
-        theme_selector = self.query_one("#theme-selector", ThemeSelector)
-        if "visible" in theme_selector.classes:
-            if event.key == "escape":
-                self.action_cancel_theme()
-                event.prevent_default()
-                event.stop()
-            return
+        try:
+            theme_selector = self.query_one("#theme-selector", ThemeSelector)
+            if "visible" in theme_selector.classes:
+                if event.key == "escape":
+                    self.action_cancel_theme()
+                    event.prevent_default()
+                    event.stop()
+                return
+        except Exception:
+            # Theme selector not available
+            pass
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
-        palette = self.query_one("#command-palette", CommandPalette)
-        palette.remove_class("visible")
+        try:
+            palette = self.query_one("#command-palette", CommandPalette)
+            palette.remove_class("visible")
+        except Exception:
+            # Command palette not available
+            pass
+
         if not (text := event.value.strip()):
             return
         event.input.clear()
@@ -1276,6 +1552,8 @@ class JarvisApp(App):
             self.show_notification(stats, "info")
         elif command == "help":
             self.show_notification("/clear /model /theme /voice /restart /perf /help /quit", "info")
+        elif command == "test-screenshot":
+            asyncio.create_task(self.test_screenshot_display())
         else:
             self.show_notification(f"Unknown: /{command}", "error")
 
@@ -1586,7 +1864,7 @@ class JarvisApp(App):
                     second_pass_chunks += 1
                     if msg := chunk.get("message", {}):
                         if content := msg.get("content"):
-                            log.warning(
+                            log.info(
                                 f"[TUI] Second pass chunk {second_pass_chunks}: "
                                 f"{len(content)} chars"
                             )
@@ -1600,7 +1878,7 @@ class JarvisApp(App):
 
         streaming_bubble.finish()
         # Remove the streaming bubble and add the final message via streaming interface
-        self.call_later(streaming_bubble.remove)
+        streaming_bubble.remove()
         self.messages.append({"role": "assistant", "content": full_response})
         # Push final response to streaming interface (will trigger add_message via listener)
         await streaming_interface.push_assistant_message(full_response)
@@ -1623,6 +1901,35 @@ class JarvisApp(App):
             except Exception:
                 pass
             core.set_status("ONLINE")
+
+    async def test_screenshot_display(self) -> None:
+        """Test capturing and displaying a screenshot without analysis"""
+        try:
+            # Import the screenshot manager
+            from tools.integrations.screenshot import get_screenshot_manager
+
+            # Show notification that we're capturing
+            self.show_notification("Capturing screenshot...", "info")
+
+            # Get screenshot manager and capture screen
+            manager = get_screenshot_manager()
+            success, path, error = await manager.capture_screen()
+
+            if success:
+                # Show the screenshot overlay
+                self._show_screenshot_overlay(path)
+                self.show_notification(f"Screenshot captured: {path}", "success")
+
+                # Auto-hide after 5 seconds
+                async def hide_after_delay():
+                    await asyncio.sleep(5)
+                    self._hide_screenshot_overlay()
+
+                asyncio.create_task(hide_after_delay())
+            else:
+                self.show_notification(f"Screenshot failed: {error}", "error")
+        except Exception as e:
+            self.show_notification(f"Test failed: {str(e)}", "error")
 
     async def process_tool_calls(
         self, tool_calls: list[dict], activity: ToolActivity
@@ -1740,6 +2047,16 @@ class JarvisApp(App):
                 self.show_notification("Voice enabled", "success")
 
     def action_cancel(self) -> None:
+        # First try to cancel screenshot overlay
+        try:
+            overlay = self.query_one("#screenshot-overlay", ScreenshotOverlay)
+            if overlay:
+                overlay.remove()
+                return
+        except Exception:
+            pass
+
+        # Then cancel other overlays
         self.action_cancel_model()
         self.action_cancel_theme()
 
@@ -1788,28 +2105,44 @@ class JarvisApp(App):
         self.action_cancel_theme()
 
     async def on_unmount(self) -> None:
-        if self._voice_task:
+        # Clean up any remaining overlays
+        try:
+            overlay = self.query_one("#screenshot-overlay", ScreenshotOverlay)
+            if overlay:
+                overlay.remove()
+        except Exception:
+            pass
+
+        # Only clean up attributes if they exist (for full JarvisApp)
+        if hasattr(self, "_voice_task") and self._voice_task:
             self._voice_task.cancel()
-        if self.voice_assistant:
+        if hasattr(self, "voice_assistant") and self.voice_assistant:
             await self.voice_assistant.stop()
-        await self.ollama.close()
-        await self.tts.close()
+        if hasattr(self, "ollama"):
+            await self.ollama.close()
+        if hasattr(self, "tts"):
+            await self.tts.close()
 
 
 def setup_logging(debug: bool = False) -> None:
-    from rich.console import Console
-    from rich.logging import RichHandler
-
     level = logging.DEBUG if debug else logging.WARNING
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
+
+    # Reduce verbosity of HTTP libraries
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
     if not root_logger.handlers:
         root_logger.addHandler(TextualHandler())
+
+    # Always write debug logs to file when debug is enabled
     if debug:
         console = Console(
             file=open("jarvis_debug.log", "w", encoding="utf-8"), width=120, force_terminal=True
         )
         fh = RichHandler(console=console, rich_tracebacks=True)
+        fh.setLevel(logging.DEBUG)
         root_logger.addHandler(fh)
 
 

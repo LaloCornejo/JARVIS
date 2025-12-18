@@ -167,13 +167,13 @@ class OllamaClient:
                         content = msg.get("content", "")
                         thinking = msg.get("thinking", "")
                         if content or thinking:
-                            log.warning(
+                            log.debug(
                                 f"[OLLAMA CHAT] chunk {chunk_count}: "
                                 f"content={len(content)}, thinking={len(thinking)}"
                             )
                     yield data
                     if data.get("done"):
-                        log.warning(f"[OLLAMA CHAT] done after {chunk_count} chunks")
+                        log.debug(f"[OLLAMA CHAT] done after {chunk_count} chunks")
                         break
 
     async def list_models(self) -> list[dict]:

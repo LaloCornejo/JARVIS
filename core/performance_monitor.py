@@ -197,7 +197,7 @@ class PerformanceMonitor:
             cpu_percent = process.cpu_percent(interval=0.1)
             self.metrics["cpu_usage"].record(cpu_percent)
 
-            log.debug(f"System stats - Memory: {memory_mb:.1f}MB, CPU: {cpu_percent:.1f}%")
+            # Don't log system stats to avoid debug file spam
         except ImportError:
             # psutil not available, skip system metrics
             pass

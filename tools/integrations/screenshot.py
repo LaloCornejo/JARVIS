@@ -402,6 +402,16 @@ class ScreenshotAnalyzeTool(BaseTool):
             if not success:
                 return ToolResult(success=False, data=None, error=error)
 
+            # Signal that screenshot modal should be shown with the path
+            from core.streaming_interface import streaming_interface
+
+            try:
+                await streaming_interface.push_tool_activity(
+                    "screenshot_analyze", "started", {"screenshot_path": path}
+                )
+            except Exception:
+                pass  # Don't fail if streaming fails
+
             # Use maximum resolution for most detailed analysis
             b64 = manager.get_base64_image(path, max_size=(1280, 1280))
             if not b64:
