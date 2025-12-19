@@ -5,7 +5,6 @@ import asyncio
 import io
 import json
 import logging
-import random
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +16,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import websockets
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.text import Text
@@ -27,35 +27,27 @@ from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.logging import TextualHandler
 from textual.message import Message
 from textual.reactive import reactive
-
-from textual.widgets import Input, OptionList, Static
+from textual.screen import Screen
+from textual.widgets import Footer, Header, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from core.assistant import AssistantState, VoiceAssistant
-from core.cache import intent_cache, should_cache_response
 from core.config import Config
-from core.llm import OllamaClient
-from core.llm.router import ModelRouter
 from core.performance_monitor import performance_monitor
 from core.streaming_interface import conversation_buffer, streaming_interface
 from core.voice.tts import TextToSpeech
 from tools import get_tool_registry
 
-import websockets
-
 log = logging.getLogger("jarvis")
 
-SYSTEM_PROMPT = """You are JARVIS, an intelligent AI assistant. \
-You are helpful, concise, and friendly.
-You have access to many tools that you can use to help the user. Always use tools for
-information retrieval, time queries, web searches, and any external data. When you need
-to perform actions or get information, use the appropriate tool. Always be direct and
-avoid unnecessary verbosity.
-IMPORTANT: Never use emojis in your responses.
+SYSTEM_PROMPT = """IMPORTANT: Never use emojis in your responses.\
+You are JARVIS, an intelligent AI assistant.
+You have female voice and speak in a clear and concise manner.
+You have access to many tools that you can use to help the user. Always use tools for screenshots, information retrieval, time queries, web searches, and any external data. When you need to perform actions or get information, use the appropriate tool. Always be direct and avoid unnecessary verbosity.
 """
 
 CYBER_FRAMES = ["─"]
-WAVE_CHARS = ["▁", "▂", "▃", "▄", "▅", "▆"]
+BRAILLE_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 
 class VoiceStateChanged(Message):
@@ -131,6 +123,15 @@ class SystemStatus(Static):
         }
         self.model = "auto"
         self.voice_state = "Idle"
+        self._processing_frame = 0
+
+    def on_mount(self) -> None:
+        self.set_interval(0.1, self._animate_processing)
+
+    def _animate_processing(self) -> None:
+        if self.voice_state == "Processing":
+            self._processing_frame = (self._processing_frame + 1) % len(BRAILLE_SPINNER)
+            self.refresh()
 
     def update_service(self, name: str, status: bool) -> None:
         name_map = {
@@ -180,8 +181,16 @@ class SystemStatus(Static):
             "Processing": "#ffaa44",
             "Speaking": "#66aaff",
         }
+
+        # Add Braille animation for Processing state
+        if self.voice_state == "Processing":
+            spinner = BRAILLE_SPINNER[self._processing_frame]
+            display_state = f"{spinner} {self.voice_state}"
+        else:
+            display_state = self.voice_state
+
         text.append(
-            f"│ {self.voice_state:<27} │\n", style=state_colors.get(self.voice_state, "#666666")
+            f"│ {display_state:<27} │\n", style=state_colors.get(self.voice_state, "#666666")
         )
         text.append("╰─────────────────────────────╯", style="#666666")
 
@@ -192,6 +201,16 @@ class CoreDisplay(Static):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.status = "ONLINE"
+        self._thinking_frame = 0
+        self._thinking_active = False
+
+    def on_mount(self) -> None:
+        self.set_interval(0.1, self._animate_thinking)
+
+    def _animate_thinking(self) -> None:
+        if self.status == "THINKING":
+            self._thinking_frame = (self._thinking_frame + 1) % len(BRAILLE_SPINNER)
+            self.refresh()
 
     def set_status(self, status: str) -> None:
         self.status = status.upper()
@@ -202,48 +221,67 @@ class CoreDisplay(Static):
         title = "J.A.R.V.I.S"
         status = self.status
 
-        # Create a centered display
-        width = self.size.width if hasattr(self, "size") and self.size.width > 0 else 30
-        height = self.size.height if hasattr(self, "size") and self.size.height > 0 else 10
+        if status == "THINKING":
+            spinner = BRAILLE_SPINNER[self._thinking_frame]
+            animated_status = f"{spinner} {status}"
+        else:
+            animated_status = status
 
-        # Title
-        title_pad = (width - len(title)) // 2
-        text.append(" " * title_pad + title + "\n", style="bold #44aa99")
-
-        # Status
-        status_pad = (width - len(status)) // 2
         status_color = {
-            "ONLINE": "#44aa99",
-            "THINKING": "#ffaa44",
-            "SPEAKING": "#66aaff",
+            "ONLINE": "#ea76cb",
+            "THINKING": "#dc8a78",
+            "SPEAKING": "#209fb5",
             "OFFLINE": "#666666",
         }.get(status, "#666666")
-        text.append(" " * status_pad + status + "\n", style=f"bold {status_color}")
+
+        # Put title and status on the same line, separated by a tab
+        text.append(title, style="bold #ea76cb")
+        text.append("\t", style="bold #ea76cb")  # Tab separator
+        text.append(animated_status, style=f"bold {status_color}")
 
         return text
 
 
-class Waveform(Static):
-    def __init__(self, **kwargs) -> None:
+# class Waveform(Static):  # TODO: Remove this
+#     def __init__(self, **kwargs) -> None:
+#         super().__init__(**kwargs)
+#         self.active = False
+#         self._heights = [0] * 24
+#
+#     def on_mount(self) -> None:
+#         self.set_interval(0.5, self._animate)
+#
+#     def _animate(self) -> None:
+#         if self.active:
+#             self._heights = [random.randint(0, 5) for _ in range(24)]
+#         else:
+#             self._heights = [max(0, h - 1) for h in self._heights]
+#         self.refresh()
+#
+#     def render(self) -> Text:
+#         chars = " ▁▂▃▄▅▆"
+#         wave = "".join(chars[min(h, 6)] for h in self._heights)
+#         color = "#44aa99" if self.active else "#333333"
+#         return Text(f"  {wave}", style=color)
+#
+
+
+class BrailleAnimation(Static):
+    def __init__(self, text: str = "Loading", **kwargs) -> None:
         super().__init__(**kwargs)
-        self.active = False
-        self._heights = [0] * 24
+        self.base_text = text
+        self.frame_index = 0
 
     def on_mount(self) -> None:
-        self.set_interval(0.5, self._animate)
+        self.set_interval(0.1, self._animate)
 
     def _animate(self) -> None:
-        if self.active:
-            self._heights = [random.randint(0, 5) for _ in range(24)]
-        else:
-            self._heights = [max(0, h - 1) for h in self._heights]
+        self.frame_index = (self.frame_index + 1) % len(BRAILLE_SPINNER)
         self.refresh()
 
     def render(self) -> Text:
-        chars = " ▁▂▃▄▅▆"
-        wave = "".join(chars[min(h, 6)] for h in self._heights)
-        color = "#44aa99" if self.active else "#333333"
-        return Text(f"  {wave}", style=color)
+        spinner = BRAILLE_SPINNER[self.frame_index]
+        return Text(f"{spinner} {self.base_text}", style="#ea76cb")
 
 
 class StreamingBubble(Static):
@@ -291,7 +329,7 @@ class StreamingBubble(Static):
 
     def render(self) -> Text:
         text = Text()
-        text.append("AI\n", style="bold #44aa99")
+        text.append("AI\n", style="bold #ea76cb")
         content = self.text_content or "..."
         for line in content.split("\n"):
             text.append(f"{line}\n", style="#aaaaaa")
@@ -308,8 +346,6 @@ class ToolActivity(Static):
         self._max_activities = 8
 
     def add_activity(self, tool: str, status: str = "running") -> None:
-        from datetime import datetime
-
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         # Check if tool already exists and update its status
@@ -382,7 +418,7 @@ class ScreenshotOverlay(Static):
         self.styles.width = "80%"
         self.styles.height = "80%"
         self.styles.background = "#0f0f0f"  # Solid dark background
-        self.styles.border = ("solid", "#44aa99")
+        self.styles.border = ("solid", "#ea76cb")
         self.styles.padding = 2
         self.styles.layer = "overlay"  # Put it on overlay layer
 
@@ -391,47 +427,29 @@ class ScreenshotOverlay(Static):
         # Ensure we don't leave any rendering artifacts
         pass
 
-    def _image_to_ascii(self, image_path: str, width: int = 50) -> list[str]:
-        """Convert image to ASCII art"""
+    def _render_image_with_term_image(self, image_path: str, width: int = 40) -> list[str]:
+        """Render image using term_image library"""
         try:
-            from PIL import Image
+            from term_image.image import from_file
 
-            # Open and convert image to grayscale
-            img = Image.open(image_path)
-            # Calculate height maintaining aspect ratio (roughly)
-            aspect_ratio = img.height / img.width
-            height = int(
-                width * aspect_ratio * 0.5
-            )  # 0.5 to account for terminal character aspect ratio
+            # Load the image with term_image
+            image = from_file(image_path)
 
-            # Resize image
-            img = img.resize((width, height)).convert("L")  # Convert to grayscale
+            # Set the width for rendering
+            image.width = width
 
-            # Define ASCII characters from darkest to lightest
-            ascii_chars = " .:-=+*#%@"
-
-            # Convert pixels to ASCII
-            ascii_lines = []
-            for y in range(height):
-                line = ""
-                for x in range(width):
-                    pixel_value = img.getpixel((x, y))
-                    # Map pixel value (0-255) to ASCII character index
-                    char_index = int(pixel_value / 255 * (len(ascii_chars) - 1))
-                    line += ascii_chars[char_index]
-                ascii_lines.append(line)
-
-            img.close()
-            return ascii_lines
+            # Render the image as a string and split into lines
+            rendered = str(image)
+            return rendered.split("\n")
         except Exception as e:
-            return [f"ASCII preview error: {str(e)}"]
+            return [f"Image rendering error: {str(e)}"]
 
     def render(self) -> Text:
         """Render the overlay content"""
         try:
             # Handle case where size is not yet determined
             if not hasattr(self, "size") or self.size.width == 0 or self.size.height == 0:
-                return Text("Loading overlay...", style="#44aa99")
+                return Text("Loading overlay...", style="#ea76cb")
         except (AttributeError, ValueError, TypeError):
             # Size not available yet or any other error
             return Text("Loading overlay...", style="#44aa99")
@@ -456,10 +474,12 @@ class ScreenshotOverlay(Static):
                 ]
                 img.close()
 
-                # Generate ASCII preview with limited size
+                # Generate image preview with limited size
                 preview_width = min(40, self.size.width - 10)
                 if preview_width > 10:
-                    ascii_preview = self._image_to_ascii(self.screenshot_path, preview_width)
+                    ascii_preview = self._render_image_with_term_image(
+                        self.screenshot_path, preview_width
+                    )
                     # Limit preview height to avoid overwhelming the display
                     ascii_preview = ascii_preview[:15]
             except Exception as e:
@@ -474,7 +494,7 @@ class ScreenshotOverlay(Static):
                 "",
             ] + image_info
 
-            # Add ASCII preview if available
+            # Add image preview if available
             if ascii_preview:
                 content_lines.extend(["", "Preview:"])
                 content_lines.extend(ascii_preview)
@@ -515,11 +535,11 @@ class ScreenshotOverlay(Static):
                 if row == start_row:
                     # Top border
                     line = "─" * box_width
-                    text.append(f"{'':<{start_col}}┌{line}┐\n", style="#44aa99")
+                    text.append(f"{'':<{start_col}}┌{line}┐\n", style="#ea76cb")
                 elif row == start_row + box_height - 1:
                     # Bottom border
                     line = "─" * box_width
-                    text.append(f"{'':<{start_col}}└{line}┘\n", style="#44aa99")
+                    text.append(f"{'':<{start_col}}└{line}┘\n", style="#ea76cb")
                 else:
                     # Content or side borders
                     content_idx = row - start_row - 1
@@ -528,7 +548,7 @@ class ScreenshotOverlay(Static):
                         padded_content = f" {content:<{box_width - 2}} "
                         if "SCREENSHOT" in content:
                             text.append(
-                                f"{'':<{start_col}}│{padded_content}│\n", style="bold #44aa99"
+                                f"{'':<{start_col}}│{padded_content}│\n", style="bold #ea76cb"
                             )
                         elif (
                             "Displaying" in content
@@ -536,11 +556,11 @@ class ScreenshotOverlay(Static):
                             or "This may" in content
                             or "Preview:" in content
                         ):
-                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#888888")
+                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#666666")
                         elif "Path:" in content or "Size:" in content or "Format:" in content:
-                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#cccccc")
+                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#ffffff")
                         else:
-                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#cccccc")
+                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#ffffff")
                     else:
                         # Empty content line
                         text.append(f"{'':<{start_col}}│{'':<{box_width}}│\n", style="#0f0f0f")
@@ -574,7 +594,7 @@ class PerformanceStats(Static):
                 self._stats_cache = performance_monitor.get_stats()
                 self._last_update = current_time
                 self.refresh()
-        except Exception as e:
+        except Exception:
             # Silently handle errors to avoid disrupting the UI
             # Keep the last good stats if available
             if not self._stats_cache:
@@ -769,7 +789,7 @@ class PerformanceStats(Static):
             text.append("═══════════════════", style="#666666")
 
             return text
-        except Exception as e:
+        except Exception:
             # Return safe fallback if rendering fails
             return Text("  Stats unavailable", style="#666666")
 
@@ -881,8 +901,23 @@ class ThemeSelector(Static):
             pass
 
 
+class PerformanceScreen(Screen):
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield PerformanceStats()
+        yield Footer()
+
+    def on_key(self, event):
+        if event.key == "escape":
+            self.app.pop_screen()
+
+
 class JarvisApp(App):
     """J.A.R.V.I.S - AI Assistant TUI Application"""
+
+    BINDINGS = [
+        Binding("p", "show_performance", "Show Performance"),
+    ]
 
     def __init__(self, debug_mode: bool = False, server_url: str = "ws://localhost:8000/ws"):
         super().__init__()
@@ -923,7 +958,7 @@ class JarvisApp(App):
 
     CSS = """
 Screen {
-    background: #0a0a0a;
+    background: #0a0a0a00;
 }
 
 #main-container {
@@ -932,9 +967,9 @@ Screen {
 }
 
 #left-panel {
-    width: 24;
+    width: 28;
     height: 100%;
-    background: #0f0f0f;
+    background: #0f0f0f05;
     border-left: solid #1a1a1a;
 }
 
@@ -951,10 +986,11 @@ Screen {
 }
 
 #core-display {
-    height: 14;
+    height: 3;
     content-align: center middle;
     background: #0a0a0a;
     margin: 1;
+    margin-top: 0;
     border: solid #1a1a1a;
 }
 
@@ -1008,18 +1044,18 @@ Screen {
 #chat-scroll {
     height: 1fr;
     margin: 0 1;
-    background: #0a0a0a;
-    scrollbar-color: #333;
-    scrollbar-color-hover: #555;
-    scrollbar-color-active: #777;
+    background: #0a0a0a00;
+    scrollbar-color: #33333301;
+    scrollbar-color-hover: #55555501;
+    scrollbar-color-active: #77777701;
 }
 
 #input-area {
     height: auto;
     dock: bottom;
     padding: 1;
-    background: #0f0f0f;
-    border-top: solid #1a1a1a;
+    background: #0f0f0f00;
+    border-top: solid #1a1a1a00;
     margin: 0 1;
 }
 
@@ -1157,12 +1193,9 @@ StreamingBubble {
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="main-container"):
-            with Vertical(id="left-panel"):
-                yield CoreDisplay(id="core-display")
-                yield Waveform(id="waveform")
-                yield SystemStatus(id="system-status")
             with Vertical(id="center-panel"):
-                yield HoloBorder(title="J.A.R.V.I.S", id="top-border")
+                yield HoloBorder(title="", id="top-border")
+                yield CoreDisplay(id="core-display")
                 yield Container(id="notification-area")
                 yield VerticalScroll(id="chat-scroll")
                 with Container(id="input-area"):
@@ -1170,10 +1203,9 @@ StreamingBubble {
                     yield CommandPalette(id="command-palette")
                     yield CommandInput(placeholder="Enter command or message...")
             with Vertical(id="right-panel"):
-                yield Static("  TOOL ACTIVITY", classes="panel-title")
+                yield SystemStatus(id="system-status")
+                yield Static("  LAST TOOL", classes="panel-title")
                 yield ToolActivity(id="tool-activity")
-                yield Static("  PERFORMANCE", classes="panel-title")
-                yield PerformanceStats(id="performance-stats")
         yield ModelSelector(id="model-selector")
         yield ThemeSelector(id="theme-selector")
 
@@ -1284,7 +1316,7 @@ StreamingBubble {
                     try:
                         tts_online = await self.tts.health_check()
                         if tts_online:
-                            await self.handle_tts(content)
+                            asyncio.create_task(self.handle_tts(content))
                             log.debug("[TUI] TTS synthesis started")
                         else:
                             log.debug("[TUI] TTS service offline, skipping speech synthesis")
@@ -1304,11 +1336,11 @@ StreamingBubble {
                     chat.scroll_end()
             elif msg_type == "message_complete":
                 # Message processing complete
+                full_response = data.get("full_response", "")
                 if self._streaming_bubble:
                     self._streaming_bubble.finish()
-                    self._streaming_bubble.remove()
+                    # Don't remove, let it become the permanent message
                     self._streaming_bubble = None
-                full_response = data.get("full_response", "")
                 self.messages.append({"role": "assistant", "content": full_response})
                 await conversation_buffer.add_message(
                     {"role": "assistant", "content": full_response}
@@ -1454,15 +1486,9 @@ StreamingBubble {
         try:
             async for update in streaming_interface.get_conversation_updates():
                 if "role" in update and "content" in update:
-                    # Only handle assistant messages from streaming to avoid duplicates
                     # User messages are handled directly in process_message()
-                    if update["role"] == "assistant":
-                        # Use call_later to ensure UI updates happen on the main thread
-                        self.call_later(
-                            lambda content=update["content"], role=update["role"]: self.add_message(
-                                content, role
-                            )
-                        )
+                    # Assistant messages are handled via websocket to avoid duplicates
+                    pass
         except Exception as e:
             log.error("Conversation streaming error: %s", e)
 
@@ -1601,7 +1627,7 @@ StreamingBubble {
     def on_voice_state_changed(self, event: VoiceStateChanged) -> None:
         try:
             status = self.query_one("#system-status", SystemStatus)
-            waveform = self.query_one("#waveform", Waveform)
+            # waveform = self.query_one("#waveform", Waveform)
             core = self.query_one("#core-display", CoreDisplay)
         except Exception:
             log.debug("UI widgets not available for voice state update")
@@ -1614,7 +1640,7 @@ StreamingBubble {
         }
         state_str = state_map.get(event.state, "IDLE")
         status.set_voice_state(state_str)
-        waveform.active = event.state == AssistantState.LISTENING
+        # waveform.active = event.state == AssistantState.LISTENING
         if event.state == AssistantState.PROCESSING:
             core.set_status("THINKING")
         elif event.state == AssistantState.SPEAKING:
@@ -2107,6 +2133,9 @@ StreamingBubble {
                 status.update_service("voice", True)
                 self.show_notification("Voice enabled", "success")
 
+    def action_show_performance(self) -> None:
+        self.app.push_screen(PerformanceScreen())
+
     def action_cancel(self) -> None:
         # First try to cancel screenshot overlay
         try:
@@ -2201,7 +2230,6 @@ def setup_logging(debug: bool = False) -> None:
     if not root_logger.handlers:
         root_logger.addHandler(TextualHandler())
 
-    # Always write debug logs to file when debug is enabled
     if debug:
         console = Console(
             file=open("jarvis_debug.log", "w", encoding="utf-8"), width=120, force_terminal=True

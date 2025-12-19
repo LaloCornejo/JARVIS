@@ -180,6 +180,9 @@ class JarvisServer:
         if websocket:
             await websocket.send_json({"type": "message_complete", "full_response": full_response})
 
+        # Send completion message first to finish streaming immediately
+        await websocket.send_json({"type": "message_complete", "full_response": full_response})
+
         # Cache response if appropriate
         if should_cache_response(user_input, full_response):
             await intent_cache.set(cache_key, full_response)
@@ -187,13 +190,13 @@ class JarvisServer:
         if len(self.messages) > self._max_messages:
             self.messages = self.messages[-self._max_messages :]
 
-        # Handle TTS if enabled - check health in real-time
+        # Handle TTS if enabled - check health in real-time (run in background)
         if full_response:
             try:
                 # Fresh health check before sending to TTS
                 tts_online = await self.tts.health_check()
                 if tts_online:
-                    await self.tts.play_stream(full_response)
+                    asyncio.create_task(self.tts.play_stream(full_response))
                     log.debug("[SERVER] TTS synthesis started")
                 else:
                     log.debug("[SERVER] TTS service offline, skipping speech synthesis")
