@@ -41,6 +41,8 @@ from core.streaming_interface import conversation_buffer, streaming_interface
 from core.voice.tts import TextToSpeech
 from tools import get_tool_registry
 
+import websockets
+
 log = logging.getLogger("jarvis")
 
 SYSTEM_PROMPT = """You are JARVIS, an intelligent AI assistant. \
@@ -123,7 +125,7 @@ class SystemStatus(Static):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.services = {
-            "Ollama": False,
+            "Server": False,
             "TTS": False,
             "Voice": False,
         }
@@ -132,18 +134,20 @@ class SystemStatus(Static):
 
     def update_service(self, name: str, status: bool) -> None:
         name_map = {
-            "OLLAMA": "Ollama",
+            "SERVER": "Server",
             "TTS": "TTS",
             "VOICE": "Voice",
         }
         key = name_map.get(name.upper(), name)
         if key in self.services:
+            old_status = self.services[key]
             self.services[key] = status
-            # Log the status change
-            import logging
+            # Log the status change only when it actually changes
+            if old_status != status:
+                import logging
 
-            log = logging.getLogger("jarvis")
-            log.info(f"Service {key} status updated to {'online' if status else 'offline'}")
+                log = logging.getLogger("jarvis")
+                log.info(f"Service {key} status changed to {'online' if status else 'offline'}")
             self.refresh()
 
     def set_model(self, model: str) -> None:
@@ -880,17 +884,15 @@ class ThemeSelector(Static):
 class JarvisApp(App):
     """J.A.R.V.I.S - AI Assistant TUI Application"""
 
-    def __init__(self, debug_mode: bool = False):
+    def __init__(self, debug_mode: bool = False, server_url: str = "ws://localhost:8000/ws"):
         super().__init__()
         # Initialize core attributes
         self._debug_mode = debug_mode  # Set debug_mode from parameter
         self.config = Config("config/settings.yaml")
-        self.ollama = OllamaClient(base_url=self.config.ollama_url, model=self.config.llm_model)
-        self.router = ModelRouter(
-            ollama_client=self.ollama,
-            primary_backend=self.config.llm_backend,
-            ollama_model=self.config.llm_fast_model(),
-        )
+        self.server_url = server_url
+        self.websocket = None
+        self.websocket_task = None
+        self.is_connected = False
         self.tts = TextToSpeech(
             base_url=self.config.tts_base_url,
             speaker=self.config.tts_speaker,
@@ -1179,7 +1181,12 @@ StreamingBubble {
         self.title = "J.A.R.V.I.S"
         # Initialize streaming interface
         await streaming_interface.initialize_streams()
+        # Connect to server
+        await self.connect_to_server()
         await self.check_services()
+        # Start periodic health checks
+        self._health_check_task = asyncio.create_task(self._periodic_health_check())
+        log.info("[TUI] Periodic health check task started")
         await self.init_voice()
         # Handle piped input for testing
         if not sys.stdin.isatty():
@@ -1188,9 +1195,211 @@ StreamingBubble {
                 if piped_input:
                     log.warning(f"[TUI] Processing piped input: {piped_input}")
                     self.add_message(piped_input, "user")
-                    self.process_message(piped_input)
+                    await self.send_message_to_server(piped_input)
             except Exception as e:
                 log.error(f"Failed to read piped input: {e}")
+
+    async def connect_to_server(self) -> None:
+        """Connect to the JARVIS server via WebSocket"""
+        try:
+            # Close existing connection if any
+            if self.websocket:
+                try:
+                    if hasattr(self.websocket, "state") and self.websocket.state == 1:  # OPEN
+                        await self.websocket.close()
+                    elif hasattr(self.websocket, "closed") and not self.websocket.closed:
+                        await self.websocket.close()
+                except Exception:
+                    pass  # Ignore errors when closing
+
+            # Cancel existing listening task
+            if (
+                hasattr(self, "websocket_task")
+                and self.websocket_task
+                and not self.websocket_task.done()
+            ):
+                self.websocket_task.cancel()
+
+            self.websocket = await websockets.connect(self.server_url)
+            self.is_connected = True
+            log.info(f"[TUI] Connected to server at {self.server_url}")
+            # Start listening for messages
+            self.websocket_task = asyncio.create_task(self.listen_for_messages())
+        except Exception as e:
+            log.error(f"[TUI] Failed to connect to server: {e}")
+            self.is_connected = False
+
+    async def check_server_health(self) -> bool:
+        """Check if server is reachable without maintaining connection"""
+        try:
+            # Try to connect briefly
+            websocket = await websockets.connect(self.server_url)
+            await websocket.close()
+            return True
+        except Exception:
+            return False
+
+    async def listen_for_messages(self) -> None:
+        """Listen for incoming messages from the server"""
+        try:
+            while self.is_connected and self.websocket:
+                # Check if connection is still valid
+                try:
+                    if hasattr(self.websocket, "state") and self.websocket.state == 3:  # CLOSED
+                        break
+                    elif hasattr(self.websocket, "closed") and self.websocket.closed:
+                        break
+                except AttributeError:
+                    # If we can't check the state, assume it's closed
+                    break
+
+                try:
+                    message = await self.websocket.recv()
+                    await self.handle_server_message(message)
+                except websockets.exceptions.ConnectionClosed:
+                    break
+        except Exception as e:
+            log.error(f"[TUI] Error listening for messages: {e}")
+        finally:
+            log.warning("[TUI] WebSocket connection closed")
+            self.is_connected = False
+
+    async def handle_server_message(self, message: str) -> None:
+        """Handle messages received from the server"""
+        try:
+            data = json.loads(message)
+            msg_type = data.get("type")
+
+            if msg_type == "user_message":
+                # Server echoes back user message
+                pass
+            elif msg_type == "assistant_message":
+                # Final assistant response
+                content = data.get("content", "")
+                cached = data.get("cached", False)
+                self.add_message(content, "assistant")
+                await streaming_interface.push_assistant_message(content)
+                if not cached:
+                    # Check TTS health in real-time before sending
+                    try:
+                        tts_online = await self.tts.health_check()
+                        if tts_online:
+                            await self.handle_tts(content)
+                            log.debug("[TUI] TTS synthesis started")
+                        else:
+                            log.debug("[TUI] TTS service offline, skipping speech synthesis")
+                    except Exception as e:
+                        log.error(f"[TUI] TTS health check failed: {e}")
+                        log.debug("[TUI] Skipping TTS due to health check error")
+            elif msg_type == "streaming_chunk":
+                # Streaming chunk
+                content = data.get("content", "")
+                replace = data.get("replace", False)
+                if replace and self._streaming_bubble:
+                    self._streaming_bubble.text_content = ""
+                    self._streaming_bubble._done = False
+                if self._streaming_bubble:
+                    self._streaming_bubble.append_text(content)
+                    chat = self.query_one("#chat-scroll", VerticalScroll)
+                    chat.scroll_end()
+            elif msg_type == "message_complete":
+                # Message processing complete
+                if self._streaming_bubble:
+                    self._streaming_bubble.finish()
+                    self._streaming_bubble.remove()
+                    self._streaming_bubble = None
+                full_response = data.get("full_response", "")
+                self.messages.append({"role": "assistant", "content": full_response})
+                await conversation_buffer.add_message(
+                    {"role": "assistant", "content": full_response}
+                )
+                # TTS handled separately
+            elif msg_type == "model_set":
+                log.info(f"[TUI] Model set to: {data.get('model')}")
+            else:
+                log.warning(f"[TUI] Unknown message type: {msg_type}")
+        except json.JSONDecodeError:
+            log.error("[TUI] Invalid JSON from server")
+        except Exception as e:
+            log.error(f"[TUI] Error handling server message: {e}")
+
+    async def _periodic_health_check(self) -> None:
+        """Periodically check service health and update status"""
+        log.info("[TUI] Starting periodic health checks")
+        while True:
+            try:
+                await asyncio.sleep(5)  # Check every 5 seconds
+
+                # Check server connection
+                server_ok = False
+                if self.is_connected and self.websocket:
+                    try:
+                        # Check if websocket is still in a valid state
+                        if hasattr(self.websocket, "state"):
+                            server_ok = self.websocket.state == 1  # OPEN
+                        elif hasattr(self.websocket, "closed"):
+                            server_ok = not self.websocket.closed
+                        else:
+                            server_ok = True  # Assume connected if we have a websocket object
+                    except Exception:
+                        server_ok = False
+
+                if not server_ok:
+                    # Try to reconnect
+                    try:
+                        await self.connect_to_server()
+                        server_ok = self.is_connected
+                    except Exception:
+                        server_ok = False
+
+                # Check TTS
+                tts_ok = False
+                try:
+                    tts_ok = await self.tts.health_check()
+                except Exception:
+                    pass
+
+                # Update status display
+                try:
+                    status = self.query_one("#system-status", SystemStatus)
+                    status.update_service("server", server_ok)
+                    status.update_service("tts", tts_ok)
+                except Exception:
+                    pass  # Widget might not be ready yet
+
+            except Exception as e:
+                log.error(f"[TUI] Health check error: {e}")
+                await asyncio.sleep(5)
+
+    async def send_message_to_server(self, user_input: str) -> None:
+        """Send a user message to the server"""
+        if not self.is_connected or not self.websocket:
+            log.error("[TUI] Not connected to server")
+            self.show_notification("Not connected to server", "error")
+            return
+
+        try:
+            message = {"type": "user_message", "content": user_input}
+            await self.websocket.send(json.dumps(message))
+        except Exception as e:
+            log.error(f"[TUI] Failed to send message to server: {e}")
+            self.show_notification("Failed to send message", "error")
+
+    async def handle_tts(self, text: str) -> None:
+        """Handle text-to-speech locally"""
+        try:
+            await self.tts.play_stream(text)
+        except Exception as e:
+            log.error(f"[TUI] TTS error: {e}")
+
+    async def set_server_model(self, model: str) -> None:
+        """Set the model on the server"""
+        if self.websocket:
+            try:
+                message = {"type": "set_model", "model": model}
+                await self.websocket.send(json.dumps(message))
+            except Exception as e:
+                log.error(f"[TUI] Failed to set model: {e}")
 
     @work(exclusive=False)
     async def load_models(self) -> None:
@@ -1213,14 +1422,10 @@ StreamingBubble {
                 log.debug("System status widget not available during service check")
                 return
 
-            ollama_ok = False
+            server_ok = self.is_connected
             tts_ok = False
 
-            try:
-                ollama_ok = await self.ollama.health_check()
-                log.warning(f"Ollama health: {ollama_ok}")
-            except Exception as e:
-                log.error(f"Ollama health check error: {e}")
+            log.warning(f"Server connection: {server_ok}")
 
             try:
                 tts_ok = await self.tts.health_check()
@@ -1229,16 +1434,16 @@ StreamingBubble {
                 log.error(f"TTS health check error: {e}")
 
             log.warning(
-                "Updating status: ollama=%s, tts=%s",
-                ollama_ok,
+                "Updating status: server=%s, tts=%s",
+                server_ok,
                 tts_ok,
             )
-            status.update_service("ollama", ollama_ok)
+            status.update_service("server", server_ok)
             status.update_service("tts", tts_ok)
             log.info("check_services COMPLETED")
 
-            if ollama_ok:
-                self.show_notification("Using Ollama backend", "info")
+            if server_ok:
+                self.show_notification("Connected to server", "info")
 
             self.load_models()
         except Exception as e:
@@ -1736,171 +1941,27 @@ StreamingBubble {
 
     @work(exclusive=True)
     async def process_message(self, user_input: str) -> None:
-        # Add user message to chat (for text input)
+        """Send user input to server for processing"""
+        # Add user message to chat
         self.add_message(user_input, "user")
-
-        # Push user message to streaming interface
         await streaming_interface.push_user_message(user_input)
 
         thinking = self.query_one("#thinking-line", Static)
         core = self.query_one("#core-display", CoreDisplay)
-        tool_activity = self.query_one("#tool-activity", ToolActivity)
         chat = self.query_one("#chat-scroll", VerticalScroll)
 
         core.set_status("THINKING")
         thinking.update("Processing...")
         self.messages.append({"role": "user", "content": user_input})
-
-        # Add to conversation buffer
         await conversation_buffer.add_message({"role": "user", "content": user_input})
 
-        # Always use Ollama since we removed Copilot and Gemini
-        client = self.ollama
-        if self._selected_model and self._selected_model[0] != "auto":
-            _, model = self._selected_model[0].split(":", 1)
-            client.model = model
-        else:
-            # Use default model
-            pass
-
-        log.warning(f"[TUI] process_message: model={client.model}")
-        thinking.update(f"Using {client.model}...")
-
-        # Check intent cache for simple queries
-        cache_key = intent_cache._generate_key(user_input, SYSTEM_PROMPT)
-        cached_response = await intent_cache.get(cache_key)
-        if cached_response and should_cache_response(user_input, cached_response):
-            log.warning("[TUI] Using cached response")
-            # Record cache hit
-            performance_monitor.record_cache_hit("intent", True)
-            thinking.update("")
-            core.set_status("ONLINE")
-            # Add cached response to chat
-            self.add_message(cached_response, "assistant")
-            await streaming_interface.push_assistant_message(cached_response)
-            await conversation_buffer.add_message({"role": "assistant", "content": cached_response})
-            return
-
-        # Record cache miss
-        performance_monitor.record_cache_hit("intent", False)
-
-        full_response = ""
-        tool_calls = []
-        schemas = self.tools.get_filtered_schemas(user_input)
-
-        streaming_bubble = StreamingBubble()
-        chat.mount(streaming_bubble)
+        # Create streaming bubble for response
+        self._streaming_bubble = StreamingBubble()
+        chat.mount(self._streaming_bubble)
         chat.scroll_end()
 
-        log.warning(f"[TUI] Starting chat stream with {type(client).__name__}")
-        start_time = asyncio.get_event_loop().time()
-        chunk_count = 0
-        async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT, tools=schemas):
-            chunk_count += 1
-            if msg := chunk.get("message", {}):
-                if content := msg.get("content"):
-                    log.warning(f"[TUI] Got content chunk {chunk_count}: {len(content)} chars")
-                    full_response += content
-                    streaming_bubble.append_text(content)
-                    chat.scroll_end()
-                if calls := msg.get("tool_calls"):
-                    for call in calls:
-                        if call.get("id") not in [tc.get("id") for tc in tool_calls]:
-                            tool_calls.append(call)
-                    log.warning(
-                        f"[TUI] Tool calls in chunk {chunk_count}: {len(calls)} calls, "
-                        f"total unique: {len(tool_calls)}"
-                    )
-        log.warning(
-            f"[TUI] Chat stream ended after {chunk_count} chunks, "
-            f"response={len(full_response)} chars"
-        )
-        duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-        performance_monitor.record_llm_response(duration_ms, True)
-
-        if tool_calls:
-            tool_names = [c.get("function", {}).get("name") for c in tool_calls]
-            log.warning(f"[TUI] Tool calls detected: {tool_names}")
-            streaming_bubble.finish()
-            self.messages.append(
-                {"role": "assistant", "content": full_response, "tool_calls": tool_calls}
-            )
-            # Push intermediate response to streaming interface
-            await streaming_interface.push_assistant_message(full_response)
-            await conversation_buffer.add_message(
-                {"role": "assistant", "content": full_response, "tool_calls": tool_calls}
-            )
-
-            tool_results = await self.process_tool_calls(tool_calls, tool_activity)
-            log.warning(f"[TUI] Tool results received: {len(tool_results)} results")
-            for i, tr in enumerate(tool_results):
-                content = tr.get("content", "")
-                log.warning(
-                    f"[TUI] Tool result {i}: {len(content)} chars - preview: {content[:200]}..."
-                )
-            self.messages.extend(tool_results)
-
-            is_vision_tool = "screenshot_analyze" in tool_names
-            if is_vision_tool and tool_results:
-                try:
-                    vision_data = json.loads(tool_results[0].get("content", "{}"))
-                    full_response = vision_data.get("analysis", "")
-                    log.warning(f"[TUI] Using vision response directly: {len(full_response)} chars")
-                    streaming_bubble.text_content = ""
-                    streaming_bubble._done = False
-                    streaming_bubble.append_text(full_response)
-                    chat.scroll_end()
-                except Exception as e:
-                    log.warning(f"[TUI] Failed to extract vision response: {e}")
-                    is_vision_tool = False
-
-            if not is_vision_tool:
-                log.warning(f"[TUI] Starting second LLM pass with {len(self.messages)} messages")
-                full_response = ""
-                streaming_bubble.text_content = ""
-                streaming_bubble._done = False
-                second_pass_chunks = 0
-                async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT):
-                    second_pass_chunks += 1
-                    if msg := chunk.get("message", {}):
-                        if content := msg.get("content"):
-                            log.info(
-                                f"[TUI] Second pass chunk {second_pass_chunks}: "
-                                f"{len(content)} chars"
-                            )
-                            full_response += content
-                            streaming_bubble.append_text(content)
-                            chat.scroll_end()
-                log.warning(
-                    f"[TUI] Second pass ended after {second_pass_chunks} chunks, "
-                    f"response={len(full_response)} chars"
-                )
-
-        streaming_bubble.finish()
-        # Remove the streaming bubble and add the final message via streaming interface
-        streaming_bubble.remove()
-        self.messages.append({"role": "assistant", "content": full_response})
-        # Push final response to streaming interface (will trigger add_message via listener)
-        await streaming_interface.push_assistant_message(full_response)
-        await conversation_buffer.add_message({"role": "assistant", "content": full_response})
-
-        # Cache response if appropriate
-        if should_cache_response(user_input, full_response):
-            await intent_cache.set(cache_key, full_response)
-
-        if len(self.messages) > self._max_messages:
-            self.messages = self.messages[-self._max_messages :]
-        thinking.update("")
-        core.set_status("ONLINE")
-        tool_activity.clear()
-
-        if full_response:
-            core.set_status("SPEAKING")
-            try:
-                await self.tts.play_stream(full_response)
-            except Exception:
-                pass
-            core.set_status("ONLINE")
+        # Send to server for processing
+        await self.send_message_to_server(user_input)
 
     async def test_screenshot_display(self) -> None:
         """Test capturing and displaying a screenshot without analysis"""
@@ -2084,6 +2145,8 @@ StreamingBubble {
                 status = self.query_one("#system-status", SystemStatus)
                 status.set_model(model_id.split(":")[-1] if ":" in model_id else model_id)
                 self.show_notification(f"Model: {model_id}", "success")
+                # Send model change to server
+                asyncio.create_task(self.set_server_model(model_id))
                 if self.voice_assistant:
                     if model_id == "auto":
                         self.voice_assistant.set_model("auto", "")
@@ -2116,6 +2179,8 @@ StreamingBubble {
         # Only clean up attributes if they exist (for full JarvisApp)
         if hasattr(self, "_voice_task") and self._voice_task:
             self._voice_task.cancel()
+        if hasattr(self, "_health_check_task") and self._health_check_task:
+            self._health_check_task.cancel()
         if hasattr(self, "voice_assistant") and self.voice_assistant:
             await self.voice_assistant.stop()
         if hasattr(self, "ollama"):

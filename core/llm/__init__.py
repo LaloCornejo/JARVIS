@@ -10,7 +10,7 @@ _fast_client: OllamaClient | None = None
 def get_vision_client() -> OllamaClient:
     global _vision_client
     if _vision_client is None:
-        _vision_client = OllamaClient(model="qwen3-vl:latest")
+        _vision_client = OllamaClient(model="qwen3-vl:4b")
         # Preload the model asynchronously
         import asyncio
 

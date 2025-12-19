@@ -442,8 +442,8 @@ class ScreenshotAnalyzeTool(BaseTool):
 7. Be exhaustive, if we are talking about a person talk about what that person is doing"""
 
             try:
-                # Extended timeout for maximum detailed analysis
-                async with asyncio.timeout(120):
+                # Reasonable timeout for detailed analysis with 4B model
+                async with asyncio.timeout(60):
                     async for chunk in vision.generate(
                         prompt=question,
                         system=system_prompt,
@@ -482,7 +482,7 @@ class ScreenshotAnalyzeTool(BaseTool):
                         return ToolResult(
                             success=False,
                             data=None,
-                            error="Vision analysis timed out after 120 seconds. The image may be very complex. Try again in a moment.",
+                            error="Vision analysis timed out after 60 seconds. The image may be very complex. Try again in a moment.",
                         )
             except Exception as e:
                 # Final fallback attempt with minimal requirements
