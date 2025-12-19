@@ -59,3 +59,6 @@ target/
 
 # Special files
 NUL
+
+# uv lock file
+uv.lock
