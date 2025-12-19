@@ -25,7 +25,10 @@ class SpeechToText:
             from faster_whisper import WhisperModel
 
             log.info(
-                "Loading Whisper model: %s on %s (%s)", self.model_size, self.device, self.compute_type
+                "Loading Whisper model: %s on %s (%s)",
+                self.model_size,
+                self.device,
+                self.compute_type,
             )
             self._model = WhisperModel(
                 self.model_size,
@@ -35,9 +38,10 @@ class SpeechToText:
             log.info("Whisper model loaded on %s", self.device)
         except Exception as e:
             if "FFmpeg" in str(e):
-                log.warning("FFmpeg extension issue, attempting to load model with basic configuration")
+                log.warning("FFmpeg issue, loading model with basic config")
                 # Try with minimal configuration
                 from faster_whisper import WhisperModel
+
                 self.device = "cpu"
                 self.compute_type = "int8"
                 self._model = WhisperModel(
@@ -109,7 +113,7 @@ class SpeechToText:
                 for segment in segments:
                     text_parts.append(segment.text)
             elif "FFmpeg" in str(e):
-                log.warning("FFmpeg extension issue during transcription, attempting with reduced features")
+                log.warning("FFmpeg issue during transcription, using reduced features")
                 # Try with simplified parameters
                 segments, _ = self._model.transcribe(
                     audio,
@@ -124,7 +128,7 @@ class SpeechToText:
                 raise
         except Exception as e:
             if "FFmpeg" in str(e):
-                log.warning("FFmpeg extension issue during transcription, attempting with reduced features")
+                log.warning("FFmpeg issue during transcription, using reduced features")
                 # Try with simplified parameters
                 segments, _ = self._model.transcribe(
                     audio,
@@ -177,7 +181,7 @@ class SpeechToText:
                 for segment in segments:
                     yield segment.text.strip()
             elif "FFmpeg" in str(e):
-                log.warning("FFmpeg extension issue during streaming transcription, attempting with reduced features")
+                log.warning("FFmpeg issue during streaming transcription, using reduced features")
                 # Try with simplified parameters
                 segments, _ = self._model.transcribe(
                     audio,
@@ -191,7 +195,7 @@ class SpeechToText:
                 raise
         except Exception as e:
             if "FFmpeg" in str(e):
-                log.warning("FFmpeg extension issue during streaming transcription, attempting with reduced features")
+                log.warning("FFmpeg issue during streaming transcription, using reduced features")
                 # Try with simplified parameters
                 segments, _ = self._model.transcribe(
                     audio,
@@ -210,12 +214,13 @@ class SpeechToText:
                 self._load_model()
             except Exception as e:
                 if "FFmpeg" in str(e):
-                    log.warning("FFmpeg extension issue during health check, attempting basic model load")
+                    log.warning("FFmpeg issue during health check, attempting basic model load")
                     # Try to load with minimal configuration
                     try:
                         self.device = "cpu"
                         self.compute_type = "int8"
                         from faster_whisper import WhisperModel
+
                         self._model = WhisperModel(
                             self.model_size,
                             device="cpu",

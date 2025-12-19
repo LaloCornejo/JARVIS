@@ -18,30 +18,17 @@ class HighPerfDataProcessorTool(BaseTool):
             "operation": {
                 "type": "string",
                 "description": "Processing operation to perform",
-                "enum": ["filter", "aggregate", "transform", "sort"]
+                "enum": ["filter", "aggregate", "transform", "sort"],
             },
-            "dataset_path": {
-                "type": "string",
-                "description": "Path to the dataset file"
-            },
-            "output_path": {
-                "type": "string",
-                "description": "Path for output results"
-            },
-            "criteria": {
-                "type": "object",
-                "description": "Operation-specific criteria"
-            }
+            "dataset_path": {"type": "string", "description": "Path to the dataset file"},
+            "output_path": {"type": "string", "description": "Path for output results"},
+            "criteria": {"type": "object", "description": "Operation-specific criteria"},
         },
         "required": ["operation", "dataset_path"],
     }
 
     async def execute(
-        self,
-        operation: str,
-        dataset_path: str,
-        output_path: str = None,
-        criteria: dict = None
+        self, operation: str, dataset_path: str, output_path: str = None, criteria: dict = None
     ) -> ToolResult:
         """Execute high-performance data processing"""
         try:
@@ -60,14 +47,12 @@ class HighPerfDataProcessorTool(BaseTool):
                 dataset_path,
                 output_path or "temp_output.jsonl",
                 operation,
-                ""  # field parameter (empty for now)
+                "",  # field parameter (empty for now)
             ]
 
             # Run Rust tool asynchronously
             process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
 
             stdout, stderr = await process.communicate()
@@ -85,22 +70,28 @@ class HighPerfDataProcessorTool(BaseTool):
         except Exception as e:
             return ToolResult(success=False, data=None, error=str(e))
 
-    async def _python_fallback(self, operation: str, dataset_path: str, criteria: dict) -> ToolResult:
+    async def _python_fallback(
+        self, operation: str, dataset_path: str, criteria: dict
+    ) -> ToolResult:
         """Fallback Python implementation"""
         import time
+
         start_time = time.time()
 
         # Simulate processing
         await asyncio.sleep(0.1)  # Simulate some work
 
         duration = time.time() - start_time
-        return ToolResult(success=True, data={
-            "operation": operation,
-            "dataset": dataset_path,
-            "duration_ms": round(duration * 1000, 2),
-            "fallback_used": True,
-            "message": "Processed using Python fallback (would be faster with Rust for large datasets)"
-        })
+        return ToolResult(
+            success=True,
+            data={
+                "operation": operation,
+                "dataset": dataset_path,
+                "duration_ms": round(duration * 1000, 2),
+                "fallback_used": True,
+                "message": "Processed using Python fallback (faster with Rust for large datasets)",
+            },
+        )
 
 
 class HighPerfFileAnalyzerTool(BaseTool):
@@ -111,29 +102,18 @@ class HighPerfFileAnalyzerTool(BaseTool):
     parameters = {
         "type": "object",
         "properties": {
-            "path": {
-                "type": "string",
-                "description": "Path to analyze"
-            },
-            "pattern": {
-                "type": "string",
-                "description": "File pattern to match (optional)"
-            },
+            "path": {"type": "string", "description": "Path to analyze"},
+            "pattern": {"type": "string", "description": "File pattern to match (optional)"},
             "recursive": {
                 "type": "boolean",
                 "description": "Whether to analyze recursively",
-                "default": True
-            }
+                "default": True,
+            },
         },
         "required": ["path"],
     }
 
-    async def execute(
-        self,
-        path: str,
-        pattern: str = None,
-        recursive: bool = True
-    ) -> ToolResult:
+    async def execute(self, path: str, pattern: str = None, recursive: bool = True) -> ToolResult:
         """Execute high-performance file analysis"""
         try:
             # Check if Rust tool is available
@@ -145,20 +125,14 @@ class HighPerfFileAnalyzerTool(BaseTool):
                 return await self._python_fallback(path, pattern)
 
             # Use Rust tool for analysis
-            cmd = [
-                str(rust_processor),
-                "analyze-files",
-                path
-            ]
+            cmd = [str(rust_processor), "analyze-files", path]
 
             if pattern:
                 cmd.append(pattern)
 
             # Run Rust tool asynchronously
             process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
 
             stdout, stderr = await process.communicate()
@@ -180,6 +154,7 @@ class HighPerfFileAnalyzerTool(BaseTool):
         """Fallback Python implementation"""
         import os
         import time
+
         start_time = time.time()
 
         # Simple file analysis
@@ -192,28 +167,25 @@ class HighPerfFileAnalyzerTool(BaseTool):
                     filepath = os.path.join(root, file)
                     try:
                         stat = os.stat(filepath)
-                        file_stats.append({
-                            "path": filepath,
-                            "size": stat.st_size,
-                            "modified": stat.st_mtime
-                        })
-                    except:
+                        file_stats.append(
+                            {"path": filepath, "size": stat.st_size, "modified": stat.st_mtime}
+                        )
+                    except Exception:
                         continue
         elif os.path.isfile(path):
             try:
                 stat = os.stat(path)
-                file_stats.append({
-                    "path": path,
-                    "size": stat.st_size,
-                    "modified": stat.st_mtime
-                })
-            except:
+                file_stats.append({"path": path, "size": stat.st_size, "modified": stat.st_mtime})
+            except Exception:
                 pass
 
         duration = time.time() - start_time
-        return ToolResult(success=True, data={
-            "files_analyzed": len(file_stats),
-            "duration_ms": round(duration * 1000, 2),
-            "fallback_used": True,
-            "sample_results": file_stats[:5]  # Show first 5 results
-        })
+        return ToolResult(
+            success=True,
+            data={
+                "files_analyzed": len(file_stats),
+                "duration_ms": round(duration * 1000, 2),
+                "fallback_used": True,
+                "sample_results": file_stats[:5],  # Show first 5 results
+            },
+        )

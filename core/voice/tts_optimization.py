@@ -5,10 +5,10 @@ Provides intelligent text chunking and streaming for TTS to improve responsivene
 and reduce latency by streaming audio as it's being generated.
 """
 
-from collections.abc import Iterator
-import re
 import logging
-from typing import List, Dict, Any
+import re
+from collections.abc import Iterator
+from typing import Any, Dict, List
 
 log = logging.getLogger("jarvis.tts_splitter")
 
@@ -53,7 +53,8 @@ class TTSStreamer:
                                     if len(current_chunk.strip()) >= self.min_chunk_size:
                                         yield current_chunk.strip()
                                         log.debug(
-                                            f"Yielded sentence-part chunk (len:{len(current_chunk.strip())})"
+                                            "Yielded sentence-part chunk (len:%s)",
+                                            len(current_chunk.strip()),
                                         )
                                         current_chunk = ""
                                 current_part = word + " "
@@ -186,7 +187,7 @@ async def optimize_tts_streaming(
         return optimized_chunks
 
     except Exception:
-        log.error(f"Error optimizing TTS streaming")
+        log.error("Error optimizing TTS streaming")
         # Fallback to simple chunking
         return [
             original_text[i : i + max_chunk_size]
@@ -197,17 +198,14 @@ async def optimize_tts_streaming(
 # Example usage and testing
 if __name__ == "__main__":
     test_text = """
-    Hello there! This is JARVIS speaking. I'm an AI assistant designed to help you 
-    with various tasks including system management, file operations, and web searching. 
-    Let me demonstrate intelligent text streaming for text-to-speech synthesis. The goal is 
-    to provide natural, comfortable pacing for listening while maintaining the flow of 
+    Hello there! This is JARVIS speaking. I'm an AI assistant designed to help you
+    with various tasks including system management, file operations, and web searching.
+    Let me demonstrate intelligent text streaming for text-to-speech synthesis. The goal is
+    to provide natural, comfortable pacing for listening while maintaining the flow of
     information. This system can break down longer responses into meaningful chunks,
     pause appropriately at sentence boundaries, and create very natural speech patterns."""
 
-    import asyncio
-
     async def test_streaming():
-        streamer = TTSStreamer()
         chunks = await optimize_tts_streaming(test_text, min_chunk_size=30, max_chunk_size=80)
 
         print(f"Input length: {len(test_text)}")

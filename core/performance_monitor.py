@@ -185,8 +185,9 @@ class PerformanceMonitor:
             return
 
         try:
-            import psutil
             import os
+
+            import psutil
 
             # Memory usage in MB
             process = psutil.Process(os.getpid())

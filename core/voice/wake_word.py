@@ -43,8 +43,11 @@ class WakeWordDetector:
                 log.warning("FFmpeg extension not available, using fallback model loading")
                 # Try to load with minimal dependencies
                 from openwakeword.model import Model
+
                 if self.model_path:
-                    self._model = Model(wakeword_models=[self.model_path], inference_framework="onnx")
+                    self._model = Model(
+                        wakeword_models=[self.model_path], inference_framework="onnx"
+                    )
                 else:
                     self._model = Model(wakeword_models=["hey_jarvis"], inference_framework="onnx")
             else:
@@ -113,7 +116,7 @@ class WakeWordDetector:
                     time.sleep(0.1)
         except Exception as e:
             if "FFmpeg" in str(e):
-                log.warning("FFmpeg extension issue in audio stream, continuing without advanced audio features")
+                log.warning("FFmpeg issue in audio stream, continuing without advanced features")
                 # Continue running without advanced audio features
                 while self._running:
                     import time

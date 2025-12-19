@@ -27,6 +27,7 @@ async def test_direct_vision():
         async with asyncio.timeout(40):
             response = vision.generate(
                 prompt="What's in this screenshot? Brief answer in 1 sentence.",
+                system="You are a helpful assistant that describes images.",
                 images=[b64],
                 stream=True,
                 temperature=0.7,
@@ -43,7 +44,9 @@ async def test_direct_vision():
     except Exception as e:
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
+
 
 if __name__ == "__main__":
     asyncio.run(test_direct_vision())

@@ -1,6 +1,5 @@
 """WebSocket server for JARVIS TUI client communication"""
 
-import asyncio
 import json
 import logging
 import sys

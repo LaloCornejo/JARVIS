@@ -33,6 +33,7 @@ from textual.widgets.option_list import Option
 
 from core.assistant import AssistantState, VoiceAssistant
 from core.config import Config
+from core.llm import get_vision_client
 from core.performance_monitor import performance_monitor
 from core.streaming_interface import conversation_buffer, streaming_interface
 from core.voice.tts import TextToSpeech
@@ -43,7 +44,9 @@ log = logging.getLogger("jarvis")
 SYSTEM_PROMPT = """IMPORTANT: Never use emojis in your responses.\
 You are JARVIS, an intelligent AI assistant.
 You have female voice and speak in a clear and concise manner.
-You have access to many tools that you can use to help the user. Always use tools for screenshots, information retrieval, time queries, web searches, and any external data. When you need to perform actions or get information, use the appropriate tool. Always be direct and avoid unnecessary verbosity.
+You have access to many tools that you can use to help the user. Always use tools for screenshots,
+information retrieval, time queries, web searches, and any external data. When you need to perform actions
+or get information, use the appropriate tool. Always be direct and avoid unnecessary verbosity.
 """
 
 CYBER_FRAMES = ["─"]
@@ -935,6 +938,10 @@ class JarvisApp(App):
             sample_rate=self.config.tts_sample_rate,
         )
         self.tools = get_tool_registry()
+
+        # Preload vision model at startup for faster responses
+        self._vision_client = get_vision_client()
+
         self.voice_assistant: VoiceAssistant | None = None
         self.messages: list[dict] = []
         self._max_messages = 50
@@ -2223,9 +2230,10 @@ def setup_logging(debug: bool = False) -> None:
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
-    # Reduce verbosity of HTTP libraries
+    # Reduce verbosity of HTTP and websocket libraries
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("websockets").setLevel(logging.WARNING)
 
     if not root_logger.handlers:
         root_logger.addHandler(TextualHandler())

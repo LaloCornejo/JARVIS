@@ -3,15 +3,13 @@
 import asyncio
 import json
 import logging
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
-from core.assistant import VoiceAssistant
 from core.cache import intent_cache, should_cache_response
 from core.config import Config
 from core.llm import OllamaClient
-from core.streaming_interface import conversation_buffer
 from core.performance_monitor import performance_monitor
-from core.streaming_interface import streaming_interface
+from core.streaming_interface import conversation_buffer, streaming_interface
 from core.voice.tts import TextToSpeech
 from tools import get_tool_registry
 
