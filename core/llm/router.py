@@ -88,7 +88,13 @@ SIMPLE_INTENTS = {
         "nope",
     },
     "time": {"what time", "what day", "what date", "the time", "the date", "today"},
-    "simple_asks": {"tell me a joke", "joke", "flip a coin", "random number", "weather"},
+    "simple_asks": {
+        "tell me a joke",
+        "joke",
+        "flip a coin",
+        "random number",
+        "weather",
+    },
 }
 
 
@@ -113,7 +119,15 @@ def classify_query(text: str) -> str:
 
     has_question_depth = any(
         q in text_lower
-        for q in ["how do", "how can", "how would", "why does", "why is", "what if", "could you"]
+        for q in [
+            "how do",
+            "how can",
+            "how would",
+            "why does",
+            "why is",
+            "what if",
+            "could you",
+        ]
     )
     if has_question_depth and word_count >= 8:
         return "complex"
@@ -157,8 +171,7 @@ class ModelRouter:
         if has_image:
             if self.gemini_client:
                 return ModelSelection(backend="gemini", model=self.gemini_model)
-            # Use vision model for images
-            return ModelSelection(backend="ollama", model="qwen3-vl")
+            return ModelSelection(backend="ollama", model="huihui_ai/qwen3-vl-abliterated:4b")
 
         complexity = classify_query(text)
 

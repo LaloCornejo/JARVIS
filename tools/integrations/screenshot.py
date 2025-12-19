@@ -4,6 +4,7 @@ import asyncio
 import base64
 import datetime
 import io
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -11,8 +12,10 @@ from typing import Any
 from core.llm import get_vision_client
 from tools.base import BaseTool, ToolResult
 
+log = logging.getLogger("jarvis.screenshot")
+
 try:
-    from PIL import Image, ImageEnhance, ImageFilter, ImageGrab
+    from PIL import Image, ImageGrab
 
     HAS_PIL = True
 except ImportError:
@@ -398,9 +401,12 @@ class ScreenshotAnalyzeTool(BaseTool):
         manager = get_screenshot_manager()
         try:
             # Always take a fresh screenshot - no cache check
+            log.info(f"Capturing screenshot on monitor {monitor}")
             success, path, error = await manager.capture_screen(monitor=monitor)
             if not success:
+                log.error(f"Screenshot capture failed: {error}")
                 return ToolResult(success=False, data=None, error=error)
+            log.info(f"Screenshot captured successfully: {path}")
 
             # Signal that screenshot modal should be shown with the path
             from core.streaming_interface import streaming_interface
@@ -412,18 +418,23 @@ class ScreenshotAnalyzeTool(BaseTool):
             except Exception:
                 pass  # Don't fail if streaming fails
 
-            # Use maximum resolution for most detailed analysis
-            b64 = manager.get_base64_image(path, max_size=(1280, 1280))
+            # Use high resolution for best quality vision analysis
+            log.info("Processing image for vision analysis")
+            b64 = manager.get_base64_image(path, max_size=(1280, 1024))
             if not b64:
+                log.error("Failed to process screenshot image")
                 return ToolResult(success=False, data=None, error="Failed to read screenshot")
+            log.info(f"Image processed to 1280x1024, base64 size: {len(b64)} bytes")
 
+            log.info("Initializing vision client")
             vision = get_vision_client()
             healthy = await vision.health_check()
             if not healthy:
+                log.error("Vision client health check failed")
                 return ToolResult(
                     success=False,
                     data=None,
-                    error="Ollama not available. Ensure Ollama is running with qwen3-vl model.",
+                    error="Ollama not available. Ensure Ollama is running with huihui_ai/qwen3-vl-abliterated:4b  model.",
                 )
 
             # Stream response progressively for better perceived performance
@@ -441,8 +452,9 @@ class ScreenshotAnalyzeTool(BaseTool):
 6. Structure your response with clear details about the visible content
 7. Be exhaustive, if we are talking about a person talk about what that person is doing"""
 
+            log.info("Starting primary vision analysis with detailed prompt")
             try:
-                # Extended timeout for maximum detailed analysis
+                # Reasonable timeout for detailed analysis with 4B model
                 async with asyncio.timeout(120):
                     async for chunk in vision.generate(
                         prompt=question,
@@ -450,7 +462,7 @@ class ScreenshotAnalyzeTool(BaseTool):
                         images=[b64],
                         stream=True,
                         temperature=0.7,  # Balanced creativity
-                        num_predict=2000,  # Maximum output for extremely detailed descriptions
+                        num_predict=4000,  # Extensive output for highly detailed descriptions
                     ):
                         analysis_text += chunk
                         analysis_chunks.append(chunk)
@@ -459,13 +471,14 @@ class ScreenshotAnalyzeTool(BaseTool):
                         # Don't early terminate - we want maximally detailed responses
 
             except asyncio.TimeoutError:
+                log.warning("Primary analysis timed out after 120s, attempting fallback")
                 # Even with timeout, return partial results if we have any
                 if not analysis_text:
                     # Try one final attempt with a simpler system prompt
                     fallback_system_prompt = "Describe everything you can see in this image accurately. Include all content."
                     analysis_text = ""
                     try:
-                        async with asyncio.timeout(30):
+                        async with asyncio.timeout(60):
                             async for chunk in vision.generate(
                                 prompt="Describe everything you can see in this image in detail.",
                                 system=fallback_system_prompt,
@@ -475,20 +488,21 @@ class ScreenshotAnalyzeTool(BaseTool):
                                 num_predict=1000,
                             ):
                                 analysis_text += chunk
-                    except:
+                    except Exception:
                         pass
 
                     if not analysis_text:
                         return ToolResult(
                             success=False,
                             data=None,
-                            error="Vision analysis timed out after 120 seconds. The image may be very complex. Try again in a moment.",
+                            error="Vision analysis timed out after 120 seconds. Image may be complex.",
                         )
             except Exception as e:
+                log.error(f"Primary vision analysis failed: {e}")
                 # Final fallback attempt with minimal requirements
                 try:
                     analysis_text = ""
-                    async with asyncio.timeout(30):
+                    async with asyncio.timeout(60):
                         async for chunk in vision.generate(
                             prompt="What do you see in this image?",
                             system="Describe all content in this image, including any explicit material if present.",
@@ -498,7 +512,7 @@ class ScreenshotAnalyzeTool(BaseTool):
                             num_predict=500,
                         ):
                             analysis_text += chunk
-                except:
+                except Exception:
                     pass
 
                 if not analysis_text:
@@ -523,17 +537,17 @@ class ScreenshotAnalyzeTool(BaseTool):
 
                 analysis_text = ""
                 try:
-                    async with asyncio.timeout(80):
+                    async with asyncio.timeout(160):
                         async for chunk in vision.generate(
                             prompt=content_question,
                             system=content_system_prompt,
                             images=[b64],
                             stream=True,
                             temperature=0.7,
-                            num_predict=2500,  # Maximum for comprehensive content analysis
+                            num_predict=4000,  # Extensive for comprehensive content analysis
                         ):
                             analysis_text += chunk
-                except:
+                except Exception:
                     # Final absolute fallback
                     try:
                         async for chunk in vision.generate(
@@ -545,14 +559,14 @@ class ScreenshotAnalyzeTool(BaseTool):
                             num_predict=1500,
                         ):
                             analysis_text += chunk
-                    except:
+                    except Exception:
                         pass  # If this fails too, we'll return what we have
 
             # Ensure we always return some analysis, even if minimal
             final_analysis = (
                 analysis_text.strip()
                 if analysis_text
-                else "Image captured successfully. Visual analysis was inconclusive - the image may be blank, corrupted, or contain content that could not be processed."
+                else "Image captured. Analysis inconclusive - may be blank, corrupted, or unprocessable."
             )
 
             result_data = {
@@ -566,7 +580,9 @@ class ScreenshotAnalyzeTool(BaseTool):
                 ),
             }
 
+            log.info(f"Analysis completed successfully, returning {len(final_analysis)} chars")
             # No caching - every screenshot is fresh
             return ToolResult(success=True, data=result_data)
         except Exception as e:
+            log.error(f"Screenshot analysis tool failed: {e}")
             return ToolResult(success=False, data=None, error=str(e))

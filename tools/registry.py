@@ -388,6 +388,10 @@ TOOL_CATEGORIES = {
             "vision",
             "watching",
             "viewing",
+            "use vision",
+            "analyze",
+            "describe",
+            "what is on",
         ],
     },
     "performance": {

@@ -5,7 +5,6 @@ import asyncio
 import io
 import json
 import logging
-import random
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +16,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import websockets
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.text import Text
@@ -27,15 +27,13 @@ from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.logging import TextualHandler
 from textual.message import Message
 from textual.reactive import reactive
-
-from textual.widgets import Input, OptionList, Static
+from textual.screen import Screen
+from textual.widgets import Footer, Header, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from core.assistant import AssistantState, VoiceAssistant
-from core.cache import intent_cache, should_cache_response
 from core.config import Config
-from core.llm import OllamaClient
-from core.llm.router import ModelRouter
+from core.llm import get_vision_client
 from core.performance_monitor import performance_monitor
 from core.streaming_interface import conversation_buffer, streaming_interface
 from core.voice.tts import TextToSpeech
@@ -43,17 +41,16 @@ from tools import get_tool_registry
 
 log = logging.getLogger("jarvis")
 
-SYSTEM_PROMPT = """You are JARVIS, an intelligent AI assistant. \
-You are helpful, concise, and friendly.
-You have access to many tools that you can use to help the user. Always use tools for
-information retrieval, time queries, web searches, and any external data. When you need
-to perform actions or get information, use the appropriate tool. Always be direct and
-avoid unnecessary verbosity.
-IMPORTANT: Never use emojis in your responses.
+SYSTEM_PROMPT = """IMPORTANT: Never use emojis in your responses.\
+You are JARVIS, an intelligent AI assistant.
+You have female voice and speak in a clear and concise manner.
+You have access to many tools that you can use to help the user. Always use tools for screenshots,
+information retrieval, time queries, web searches, and any external data. When you need to perform actions
+or get information, use the appropriate tool. Always be direct and avoid unnecessary verbosity.
 """
 
 CYBER_FRAMES = ["─"]
-WAVE_CHARS = ["▁", "▂", "▃", "▄", "▅", "▆"]
+BRAILLE_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 
 class VoiceStateChanged(Message):
@@ -123,27 +120,38 @@ class SystemStatus(Static):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.services = {
-            "Ollama": False,
+            "Server": False,
             "TTS": False,
             "Voice": False,
         }
         self.model = "auto"
         self.voice_state = "Idle"
+        self._processing_frame = 0
+
+    def on_mount(self) -> None:
+        self.set_interval(0.1, self._animate_processing)
+
+    def _animate_processing(self) -> None:
+        if self.voice_state == "Processing":
+            self._processing_frame = (self._processing_frame + 1) % len(BRAILLE_SPINNER)
+            self.refresh()
 
     def update_service(self, name: str, status: bool) -> None:
         name_map = {
-            "OLLAMA": "Ollama",
+            "SERVER": "Server",
             "TTS": "TTS",
             "VOICE": "Voice",
         }
         key = name_map.get(name.upper(), name)
         if key in self.services:
+            old_status = self.services[key]
             self.services[key] = status
-            # Log the status change
-            import logging
+            # Log the status change only when it actually changes
+            if old_status != status:
+                import logging
 
-            log = logging.getLogger("jarvis")
-            log.info(f"Service {key} status updated to {'online' if status else 'offline'}")
+                log = logging.getLogger("jarvis")
+                log.info(f"Service {key} status changed to {'online' if status else 'offline'}")
             self.refresh()
 
     def set_model(self, model: str) -> None:
@@ -176,8 +184,16 @@ class SystemStatus(Static):
             "Processing": "#ffaa44",
             "Speaking": "#66aaff",
         }
+
+        # Add Braille animation for Processing state
+        if self.voice_state == "Processing":
+            spinner = BRAILLE_SPINNER[self._processing_frame]
+            display_state = f"{spinner} {self.voice_state}"
+        else:
+            display_state = self.voice_state
+
         text.append(
-            f"│ {self.voice_state:<27} │\n", style=state_colors.get(self.voice_state, "#666666")
+            f"│ {display_state:<27} │\n", style=state_colors.get(self.voice_state, "#666666")
         )
         text.append("╰─────────────────────────────╯", style="#666666")
 
@@ -188,6 +204,16 @@ class CoreDisplay(Static):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.status = "ONLINE"
+        self._thinking_frame = 0
+        self._thinking_active = False
+
+    def on_mount(self) -> None:
+        self.set_interval(0.1, self._animate_thinking)
+
+    def _animate_thinking(self) -> None:
+        if self.status == "THINKING":
+            self._thinking_frame = (self._thinking_frame + 1) % len(BRAILLE_SPINNER)
+            self.refresh()
 
     def set_status(self, status: str) -> None:
         self.status = status.upper()
@@ -198,48 +224,67 @@ class CoreDisplay(Static):
         title = "J.A.R.V.I.S"
         status = self.status
 
-        # Create a centered display
-        width = self.size.width if hasattr(self, "size") and self.size.width > 0 else 30
-        height = self.size.height if hasattr(self, "size") and self.size.height > 0 else 10
+        if status == "THINKING":
+            spinner = BRAILLE_SPINNER[self._thinking_frame]
+            animated_status = f"{spinner} {status}"
+        else:
+            animated_status = status
 
-        # Title
-        title_pad = (width - len(title)) // 2
-        text.append(" " * title_pad + title + "\n", style="bold #44aa99")
-
-        # Status
-        status_pad = (width - len(status)) // 2
         status_color = {
-            "ONLINE": "#44aa99",
-            "THINKING": "#ffaa44",
-            "SPEAKING": "#66aaff",
+            "ONLINE": "#ea76cb",
+            "THINKING": "#dc8a78",
+            "SPEAKING": "#209fb5",
             "OFFLINE": "#666666",
         }.get(status, "#666666")
-        text.append(" " * status_pad + status + "\n", style=f"bold {status_color}")
+
+        # Put title and status on the same line, separated by a tab
+        text.append(title, style="bold #ea76cb")
+        text.append("\t", style="bold #ea76cb")  # Tab separator
+        text.append(animated_status, style=f"bold {status_color}")
 
         return text
 
 
-class Waveform(Static):
-    def __init__(self, **kwargs) -> None:
+# class Waveform(Static):  # TODO: Remove this
+#     def __init__(self, **kwargs) -> None:
+#         super().__init__(**kwargs)
+#         self.active = False
+#         self._heights = [0] * 24
+#
+#     def on_mount(self) -> None:
+#         self.set_interval(0.5, self._animate)
+#
+#     def _animate(self) -> None:
+#         if self.active:
+#             self._heights = [random.randint(0, 5) for _ in range(24)]
+#         else:
+#             self._heights = [max(0, h - 1) for h in self._heights]
+#         self.refresh()
+#
+#     def render(self) -> Text:
+#         chars = " ▁▂▃▄▅▆"
+#         wave = "".join(chars[min(h, 6)] for h in self._heights)
+#         color = "#44aa99" if self.active else "#333333"
+#         return Text(f"  {wave}", style=color)
+#
+
+
+class BrailleAnimation(Static):
+    def __init__(self, text: str = "Loading", **kwargs) -> None:
         super().__init__(**kwargs)
-        self.active = False
-        self._heights = [0] * 24
+        self.base_text = text
+        self.frame_index = 0
 
     def on_mount(self) -> None:
-        self.set_interval(0.5, self._animate)
+        self.set_interval(0.1, self._animate)
 
     def _animate(self) -> None:
-        if self.active:
-            self._heights = [random.randint(0, 5) for _ in range(24)]
-        else:
-            self._heights = [max(0, h - 1) for h in self._heights]
+        self.frame_index = (self.frame_index + 1) % len(BRAILLE_SPINNER)
         self.refresh()
 
     def render(self) -> Text:
-        chars = " ▁▂▃▄▅▆"
-        wave = "".join(chars[min(h, 6)] for h in self._heights)
-        color = "#44aa99" if self.active else "#333333"
-        return Text(f"  {wave}", style=color)
+        spinner = BRAILLE_SPINNER[self.frame_index]
+        return Text(f"{spinner} {self.base_text}", style="#ea76cb")
 
 
 class StreamingBubble(Static):
@@ -287,7 +332,7 @@ class StreamingBubble(Static):
 
     def render(self) -> Text:
         text = Text()
-        text.append("AI\n", style="bold #44aa99")
+        text.append("AI\n", style="bold #ea76cb")
         content = self.text_content or "..."
         for line in content.split("\n"):
             text.append(f"{line}\n", style="#aaaaaa")
@@ -304,8 +349,6 @@ class ToolActivity(Static):
         self._max_activities = 8
 
     def add_activity(self, tool: str, status: str = "running") -> None:
-        from datetime import datetime
-
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         # Check if tool already exists and update its status
@@ -378,7 +421,7 @@ class ScreenshotOverlay(Static):
         self.styles.width = "80%"
         self.styles.height = "80%"
         self.styles.background = "#0f0f0f"  # Solid dark background
-        self.styles.border = ("solid", "#44aa99")
+        self.styles.border = ("solid", "#ea76cb")
         self.styles.padding = 2
         self.styles.layer = "overlay"  # Put it on overlay layer
 
@@ -387,47 +430,29 @@ class ScreenshotOverlay(Static):
         # Ensure we don't leave any rendering artifacts
         pass
 
-    def _image_to_ascii(self, image_path: str, width: int = 50) -> list[str]:
-        """Convert image to ASCII art"""
+    def _render_image_with_term_image(self, image_path: str, width: int = 40) -> list[str]:
+        """Render image using term_image library"""
         try:
-            from PIL import Image
+            from term_image.image import from_file
 
-            # Open and convert image to grayscale
-            img = Image.open(image_path)
-            # Calculate height maintaining aspect ratio (roughly)
-            aspect_ratio = img.height / img.width
-            height = int(
-                width * aspect_ratio * 0.5
-            )  # 0.5 to account for terminal character aspect ratio
+            # Load the image with term_image
+            image = from_file(image_path)
 
-            # Resize image
-            img = img.resize((width, height)).convert("L")  # Convert to grayscale
+            # Set the width for rendering
+            image.width = width
 
-            # Define ASCII characters from darkest to lightest
-            ascii_chars = " .:-=+*#%@"
-
-            # Convert pixels to ASCII
-            ascii_lines = []
-            for y in range(height):
-                line = ""
-                for x in range(width):
-                    pixel_value = img.getpixel((x, y))
-                    # Map pixel value (0-255) to ASCII character index
-                    char_index = int(pixel_value / 255 * (len(ascii_chars) - 1))
-                    line += ascii_chars[char_index]
-                ascii_lines.append(line)
-
-            img.close()
-            return ascii_lines
+            # Render the image as a string and split into lines
+            rendered = str(image)
+            return rendered.split("\n")
         except Exception as e:
-            return [f"ASCII preview error: {str(e)}"]
+            return [f"Image rendering error: {str(e)}"]
 
     def render(self) -> Text:
         """Render the overlay content"""
         try:
             # Handle case where size is not yet determined
             if not hasattr(self, "size") or self.size.width == 0 or self.size.height == 0:
-                return Text("Loading overlay...", style="#44aa99")
+                return Text("Loading overlay...", style="#ea76cb")
         except (AttributeError, ValueError, TypeError):
             # Size not available yet or any other error
             return Text("Loading overlay...", style="#44aa99")
@@ -452,10 +477,12 @@ class ScreenshotOverlay(Static):
                 ]
                 img.close()
 
-                # Generate ASCII preview with limited size
+                # Generate image preview with limited size
                 preview_width = min(40, self.size.width - 10)
                 if preview_width > 10:
-                    ascii_preview = self._image_to_ascii(self.screenshot_path, preview_width)
+                    ascii_preview = self._render_image_with_term_image(
+                        self.screenshot_path, preview_width
+                    )
                     # Limit preview height to avoid overwhelming the display
                     ascii_preview = ascii_preview[:15]
             except Exception as e:
@@ -470,7 +497,7 @@ class ScreenshotOverlay(Static):
                 "",
             ] + image_info
 
-            # Add ASCII preview if available
+            # Add image preview if available
             if ascii_preview:
                 content_lines.extend(["", "Preview:"])
                 content_lines.extend(ascii_preview)
@@ -511,11 +538,11 @@ class ScreenshotOverlay(Static):
                 if row == start_row:
                     # Top border
                     line = "─" * box_width
-                    text.append(f"{'':<{start_col}}┌{line}┐\n", style="#44aa99")
+                    text.append(f"{'':<{start_col}}┌{line}┐\n", style="#ea76cb")
                 elif row == start_row + box_height - 1:
                     # Bottom border
                     line = "─" * box_width
-                    text.append(f"{'':<{start_col}}└{line}┘\n", style="#44aa99")
+                    text.append(f"{'':<{start_col}}└{line}┘\n", style="#ea76cb")
                 else:
                     # Content or side borders
                     content_idx = row - start_row - 1
@@ -524,7 +551,7 @@ class ScreenshotOverlay(Static):
                         padded_content = f" {content:<{box_width - 2}} "
                         if "SCREENSHOT" in content:
                             text.append(
-                                f"{'':<{start_col}}│{padded_content}│\n", style="bold #44aa99"
+                                f"{'':<{start_col}}│{padded_content}│\n", style="bold #ea76cb"
                             )
                         elif (
                             "Displaying" in content
@@ -532,11 +559,11 @@ class ScreenshotOverlay(Static):
                             or "This may" in content
                             or "Preview:" in content
                         ):
-                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#888888")
+                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#666666")
                         elif "Path:" in content or "Size:" in content or "Format:" in content:
-                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#cccccc")
+                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#ffffff")
                         else:
-                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#cccccc")
+                            text.append(f"{'':<{start_col}}│{padded_content}│\n", style="#ffffff")
                     else:
                         # Empty content line
                         text.append(f"{'':<{start_col}}│{'':<{box_width}}│\n", style="#0f0f0f")
@@ -570,7 +597,7 @@ class PerformanceStats(Static):
                 self._stats_cache = performance_monitor.get_stats()
                 self._last_update = current_time
                 self.refresh()
-        except Exception as e:
+        except Exception:
             # Silently handle errors to avoid disrupting the UI
             # Keep the last good stats if available
             if not self._stats_cache:
@@ -765,7 +792,7 @@ class PerformanceStats(Static):
             text.append("═══════════════════", style="#666666")
 
             return text
-        except Exception as e:
+        except Exception:
             # Return safe fallback if rendering fails
             return Text("  Stats unavailable", style="#666666")
 
@@ -877,20 +904,33 @@ class ThemeSelector(Static):
             pass
 
 
+class PerformanceScreen(Screen):
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield PerformanceStats()
+        yield Footer()
+
+    def on_key(self, event):
+        if event.key == "escape":
+            self.app.pop_screen()
+
+
 class JarvisApp(App):
     """J.A.R.V.I.S - AI Assistant TUI Application"""
 
-    def __init__(self, debug_mode: bool = False):
+    BINDINGS = [
+        Binding("p", "show_performance", "Show Performance"),
+    ]
+
+    def __init__(self, debug_mode: bool = False, server_url: str = "ws://localhost:8000/ws"):
         super().__init__()
         # Initialize core attributes
         self._debug_mode = debug_mode  # Set debug_mode from parameter
         self.config = Config("config/settings.yaml")
-        self.ollama = OllamaClient(base_url=self.config.ollama_url, model=self.config.llm_model)
-        self.router = ModelRouter(
-            ollama_client=self.ollama,
-            primary_backend=self.config.llm_backend,
-            ollama_model=self.config.llm_fast_model(),
-        )
+        self.server_url = server_url
+        self.websocket = None
+        self.websocket_task = None
+        self.is_connected = False
         self.tts = TextToSpeech(
             base_url=self.config.tts_base_url,
             speaker=self.config.tts_speaker,
@@ -898,6 +938,10 @@ class JarvisApp(App):
             sample_rate=self.config.tts_sample_rate,
         )
         self.tools = get_tool_registry()
+
+        # Preload vision model at startup for faster responses
+        self._vision_client = get_vision_client()
+
         self.voice_assistant: VoiceAssistant | None = None
         self.messages: list[dict] = []
         self._max_messages = 50
@@ -921,7 +965,7 @@ class JarvisApp(App):
 
     CSS = """
 Screen {
-    background: #0a0a0a;
+    background: #0a0a0a00;
 }
 
 #main-container {
@@ -930,9 +974,9 @@ Screen {
 }
 
 #left-panel {
-    width: 24;
+    width: 28;
     height: 100%;
-    background: #0f0f0f;
+    background: #0f0f0f05;
     border-left: solid #1a1a1a;
 }
 
@@ -949,10 +993,11 @@ Screen {
 }
 
 #core-display {
-    height: 14;
+    height: 3;
     content-align: center middle;
     background: #0a0a0a;
     margin: 1;
+    margin-top: 0;
     border: solid #1a1a1a;
 }
 
@@ -1006,18 +1051,18 @@ Screen {
 #chat-scroll {
     height: 1fr;
     margin: 0 1;
-    background: #0a0a0a;
-    scrollbar-color: #333;
-    scrollbar-color-hover: #555;
-    scrollbar-color-active: #777;
+    background: #0a0a0a00;
+    scrollbar-color: #33333301;
+    scrollbar-color-hover: #55555501;
+    scrollbar-color-active: #77777701;
 }
 
 #input-area {
     height: auto;
     dock: bottom;
     padding: 1;
-    background: #0f0f0f;
-    border-top: solid #1a1a1a;
+    background: #0f0f0f00;
+    border-top: solid #1a1a1a00;
     margin: 0 1;
 }
 
@@ -1155,12 +1200,9 @@ StreamingBubble {
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="main-container"):
-            with Vertical(id="left-panel"):
-                yield CoreDisplay(id="core-display")
-                yield Waveform(id="waveform")
-                yield SystemStatus(id="system-status")
             with Vertical(id="center-panel"):
-                yield HoloBorder(title="J.A.R.V.I.S", id="top-border")
+                yield HoloBorder(title="", id="top-border")
+                yield CoreDisplay(id="core-display")
                 yield Container(id="notification-area")
                 yield VerticalScroll(id="chat-scroll")
                 with Container(id="input-area"):
@@ -1168,10 +1210,9 @@ StreamingBubble {
                     yield CommandPalette(id="command-palette")
                     yield CommandInput(placeholder="Enter command or message...")
             with Vertical(id="right-panel"):
-                yield Static("  TOOL ACTIVITY", classes="panel-title")
+                yield SystemStatus(id="system-status")
+                yield Static("  LAST TOOL", classes="panel-title")
                 yield ToolActivity(id="tool-activity")
-                yield Static("  PERFORMANCE", classes="panel-title")
-                yield PerformanceStats(id="performance-stats")
         yield ModelSelector(id="model-selector")
         yield ThemeSelector(id="theme-selector")
 
@@ -1179,7 +1220,12 @@ StreamingBubble {
         self.title = "J.A.R.V.I.S"
         # Initialize streaming interface
         await streaming_interface.initialize_streams()
+        # Connect to server
+        await self.connect_to_server()
         await self.check_services()
+        # Start periodic health checks
+        self._health_check_task = asyncio.create_task(self._periodic_health_check())
+        log.info("[TUI] Periodic health check task started")
         await self.init_voice()
         # Handle piped input for testing
         if not sys.stdin.isatty():
@@ -1188,9 +1234,211 @@ StreamingBubble {
                 if piped_input:
                     log.warning(f"[TUI] Processing piped input: {piped_input}")
                     self.add_message(piped_input, "user")
-                    self.process_message(piped_input)
+                    await self.send_message_to_server(piped_input)
             except Exception as e:
                 log.error(f"Failed to read piped input: {e}")
+
+    async def connect_to_server(self) -> None:
+        """Connect to the JARVIS server via WebSocket"""
+        try:
+            # Close existing connection if any
+            if self.websocket:
+                try:
+                    if hasattr(self.websocket, "state") and self.websocket.state == 1:  # OPEN
+                        await self.websocket.close()
+                    elif hasattr(self.websocket, "closed") and not self.websocket.closed:
+                        await self.websocket.close()
+                except Exception:
+                    pass  # Ignore errors when closing
+
+            # Cancel existing listening task
+            if (
+                hasattr(self, "websocket_task")
+                and self.websocket_task
+                and not self.websocket_task.done()
+            ):
+                self.websocket_task.cancel()
+
+            self.websocket = await websockets.connect(self.server_url)
+            self.is_connected = True
+            log.info(f"[TUI] Connected to server at {self.server_url}")
+            # Start listening for messages
+            self.websocket_task = asyncio.create_task(self.listen_for_messages())
+        except Exception as e:
+            log.error(f"[TUI] Failed to connect to server: {e}")
+            self.is_connected = False
+
+    async def check_server_health(self) -> bool:
+        """Check if server is reachable without maintaining connection"""
+        try:
+            # Try to connect briefly
+            websocket = await websockets.connect(self.server_url)
+            await websocket.close()
+            return True
+        except Exception:
+            return False
+
+    async def listen_for_messages(self) -> None:
+        """Listen for incoming messages from the server"""
+        try:
+            while self.is_connected and self.websocket:
+                # Check if connection is still valid
+                try:
+                    if hasattr(self.websocket, "state") and self.websocket.state == 3:  # CLOSED
+                        break
+                    elif hasattr(self.websocket, "closed") and self.websocket.closed:
+                        break
+                except AttributeError:
+                    # If we can't check the state, assume it's closed
+                    break
+
+                try:
+                    message = await self.websocket.recv()
+                    await self.handle_server_message(message)
+                except websockets.exceptions.ConnectionClosed:
+                    break
+        except Exception as e:
+            log.error(f"[TUI] Error listening for messages: {e}")
+        finally:
+            log.warning("[TUI] WebSocket connection closed")
+            self.is_connected = False
+
+    async def handle_server_message(self, message: str) -> None:
+        """Handle messages received from the server"""
+        try:
+            data = json.loads(message)
+            msg_type = data.get("type")
+
+            if msg_type == "user_message":
+                # Server echoes back user message
+                pass
+            elif msg_type == "assistant_message":
+                # Final assistant response
+                content = data.get("content", "")
+                cached = data.get("cached", False)
+                self.add_message(content, "assistant")
+                await streaming_interface.push_assistant_message(content)
+                if not cached:
+                    # Check TTS health in real-time before sending
+                    try:
+                        tts_online = await self.tts.health_check()
+                        if tts_online:
+                            asyncio.create_task(self.handle_tts(content))
+                            log.debug("[TUI] TTS synthesis started")
+                        else:
+                            log.debug("[TUI] TTS service offline, skipping speech synthesis")
+                    except Exception as e:
+                        log.error(f"[TUI] TTS health check failed: {e}")
+                        log.debug("[TUI] Skipping TTS due to health check error")
+            elif msg_type == "streaming_chunk":
+                # Streaming chunk
+                content = data.get("content", "")
+                replace = data.get("replace", False)
+                if replace and self._streaming_bubble:
+                    self._streaming_bubble.text_content = ""
+                    self._streaming_bubble._done = False
+                if self._streaming_bubble:
+                    self._streaming_bubble.append_text(content)
+                    chat = self.query_one("#chat-scroll", VerticalScroll)
+                    chat.scroll_end()
+            elif msg_type == "message_complete":
+                # Message processing complete
+                full_response = data.get("full_response", "")
+                if self._streaming_bubble:
+                    self._streaming_bubble.finish()
+                    # Don't remove, let it become the permanent message
+                    self._streaming_bubble = None
+                self.messages.append({"role": "assistant", "content": full_response})
+                await conversation_buffer.add_message(
+                    {"role": "assistant", "content": full_response}
+                )
+                # TTS handled separately
+            elif msg_type == "model_set":
+                log.info(f"[TUI] Model set to: {data.get('model')}")
+            else:
+                log.warning(f"[TUI] Unknown message type: {msg_type}")
+        except json.JSONDecodeError:
+            log.error("[TUI] Invalid JSON from server")
+        except Exception as e:
+            log.error(f"[TUI] Error handling server message: {e}")
+
+    async def _periodic_health_check(self) -> None:
+        """Periodically check service health and update status"""
+        log.info("[TUI] Starting periodic health checks")
+        while True:
+            try:
+                await asyncio.sleep(5)  # Check every 5 seconds
+
+                # Check server connection
+                server_ok = False
+                if self.is_connected and self.websocket:
+                    try:
+                        # Check if websocket is still in a valid state
+                        if hasattr(self.websocket, "state"):
+                            server_ok = self.websocket.state == 1  # OPEN
+                        elif hasattr(self.websocket, "closed"):
+                            server_ok = not self.websocket.closed
+                        else:
+                            server_ok = True  # Assume connected if we have a websocket object
+                    except Exception:
+                        server_ok = False
+
+                if not server_ok:
+                    # Try to reconnect
+                    try:
+                        await self.connect_to_server()
+                        server_ok = self.is_connected
+                    except Exception:
+                        server_ok = False
+
+                # Check TTS
+                tts_ok = False
+                try:
+                    tts_ok = await self.tts.health_check()
+                except Exception:
+                    pass
+
+                # Update status display
+                try:
+                    status = self.query_one("#system-status", SystemStatus)
+                    status.update_service("server", server_ok)
+                    status.update_service("tts", tts_ok)
+                except Exception:
+                    pass  # Widget might not be ready yet
+
+            except Exception as e:
+                log.error(f"[TUI] Health check error: {e}")
+                await asyncio.sleep(5)
+
+    async def send_message_to_server(self, user_input: str) -> None:
+        """Send a user message to the server"""
+        if not self.is_connected or not self.websocket:
+            log.error("[TUI] Not connected to server")
+            self.show_notification("Not connected to server", "error")
+            return
+
+        try:
+            message = {"type": "user_message", "content": user_input}
+            await self.websocket.send(json.dumps(message))
+        except Exception as e:
+            log.error(f"[TUI] Failed to send message to server: {e}")
+            self.show_notification("Failed to send message", "error")
+
+    async def handle_tts(self, text: str) -> None:
+        """Handle text-to-speech locally"""
+        try:
+            await self.tts.play_stream(text)
+        except Exception as e:
+            log.error(f"[TUI] TTS error: {e}")
+
+    async def set_server_model(self, model: str) -> None:
+        """Set the model on the server"""
+        if self.websocket:
+            try:
+                message = {"type": "set_model", "model": model}
+                await self.websocket.send(json.dumps(message))
+            except Exception as e:
+                log.error(f"[TUI] Failed to set model: {e}")
 
     @work(exclusive=False)
     async def load_models(self) -> None:
@@ -1213,14 +1461,10 @@ StreamingBubble {
                 log.debug("System status widget not available during service check")
                 return
 
-            ollama_ok = False
+            server_ok = self.is_connected
             tts_ok = False
 
-            try:
-                ollama_ok = await self.ollama.health_check()
-                log.warning(f"Ollama health: {ollama_ok}")
-            except Exception as e:
-                log.error(f"Ollama health check error: {e}")
+            log.warning(f"Server connection: {server_ok}")
 
             try:
                 tts_ok = await self.tts.health_check()
@@ -1229,16 +1473,16 @@ StreamingBubble {
                 log.error(f"TTS health check error: {e}")
 
             log.warning(
-                "Updating status: ollama=%s, tts=%s",
-                ollama_ok,
+                "Updating status: server=%s, tts=%s",
+                server_ok,
                 tts_ok,
             )
-            status.update_service("ollama", ollama_ok)
+            status.update_service("server", server_ok)
             status.update_service("tts", tts_ok)
             log.info("check_services COMPLETED")
 
-            if ollama_ok:
-                self.show_notification("Using Ollama backend", "info")
+            if server_ok:
+                self.show_notification("Connected to server", "info")
 
             self.load_models()
         except Exception as e:
@@ -1249,15 +1493,9 @@ StreamingBubble {
         try:
             async for update in streaming_interface.get_conversation_updates():
                 if "role" in update and "content" in update:
-                    # Only handle assistant messages from streaming to avoid duplicates
                     # User messages are handled directly in process_message()
-                    if update["role"] == "assistant":
-                        # Use call_later to ensure UI updates happen on the main thread
-                        self.call_later(
-                            lambda content=update["content"], role=update["role"]: self.add_message(
-                                content, role
-                            )
-                        )
+                    # Assistant messages are handled via websocket to avoid duplicates
+                    pass
         except Exception as e:
             log.error("Conversation streaming error: %s", e)
 
@@ -1396,7 +1634,7 @@ StreamingBubble {
     def on_voice_state_changed(self, event: VoiceStateChanged) -> None:
         try:
             status = self.query_one("#system-status", SystemStatus)
-            waveform = self.query_one("#waveform", Waveform)
+            # waveform = self.query_one("#waveform", Waveform)
             core = self.query_one("#core-display", CoreDisplay)
         except Exception:
             log.debug("UI widgets not available for voice state update")
@@ -1409,7 +1647,7 @@ StreamingBubble {
         }
         state_str = state_map.get(event.state, "IDLE")
         status.set_voice_state(state_str)
-        waveform.active = event.state == AssistantState.LISTENING
+        # waveform.active = event.state == AssistantState.LISTENING
         if event.state == AssistantState.PROCESSING:
             core.set_status("THINKING")
         elif event.state == AssistantState.SPEAKING:
@@ -1736,171 +1974,27 @@ StreamingBubble {
 
     @work(exclusive=True)
     async def process_message(self, user_input: str) -> None:
-        # Add user message to chat (for text input)
+        """Send user input to server for processing"""
+        # Add user message to chat
         self.add_message(user_input, "user")
-
-        # Push user message to streaming interface
         await streaming_interface.push_user_message(user_input)
 
         thinking = self.query_one("#thinking-line", Static)
         core = self.query_one("#core-display", CoreDisplay)
-        tool_activity = self.query_one("#tool-activity", ToolActivity)
         chat = self.query_one("#chat-scroll", VerticalScroll)
 
         core.set_status("THINKING")
         thinking.update("Processing...")
         self.messages.append({"role": "user", "content": user_input})
-
-        # Add to conversation buffer
         await conversation_buffer.add_message({"role": "user", "content": user_input})
 
-        # Always use Ollama since we removed Copilot and Gemini
-        client = self.ollama
-        if self._selected_model and self._selected_model[0] != "auto":
-            _, model = self._selected_model[0].split(":", 1)
-            client.model = model
-        else:
-            # Use default model
-            pass
-
-        log.warning(f"[TUI] process_message: model={client.model}")
-        thinking.update(f"Using {client.model}...")
-
-        # Check intent cache for simple queries
-        cache_key = intent_cache._generate_key(user_input, SYSTEM_PROMPT)
-        cached_response = await intent_cache.get(cache_key)
-        if cached_response and should_cache_response(user_input, cached_response):
-            log.warning("[TUI] Using cached response")
-            # Record cache hit
-            performance_monitor.record_cache_hit("intent", True)
-            thinking.update("")
-            core.set_status("ONLINE")
-            # Add cached response to chat
-            self.add_message(cached_response, "assistant")
-            await streaming_interface.push_assistant_message(cached_response)
-            await conversation_buffer.add_message({"role": "assistant", "content": cached_response})
-            return
-
-        # Record cache miss
-        performance_monitor.record_cache_hit("intent", False)
-
-        full_response = ""
-        tool_calls = []
-        schemas = self.tools.get_filtered_schemas(user_input)
-
-        streaming_bubble = StreamingBubble()
-        chat.mount(streaming_bubble)
+        # Create streaming bubble for response
+        self._streaming_bubble = StreamingBubble()
+        chat.mount(self._streaming_bubble)
         chat.scroll_end()
 
-        log.warning(f"[TUI] Starting chat stream with {type(client).__name__}")
-        start_time = asyncio.get_event_loop().time()
-        chunk_count = 0
-        async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT, tools=schemas):
-            chunk_count += 1
-            if msg := chunk.get("message", {}):
-                if content := msg.get("content"):
-                    log.warning(f"[TUI] Got content chunk {chunk_count}: {len(content)} chars")
-                    full_response += content
-                    streaming_bubble.append_text(content)
-                    chat.scroll_end()
-                if calls := msg.get("tool_calls"):
-                    for call in calls:
-                        if call.get("id") not in [tc.get("id") for tc in tool_calls]:
-                            tool_calls.append(call)
-                    log.warning(
-                        f"[TUI] Tool calls in chunk {chunk_count}: {len(calls)} calls, "
-                        f"total unique: {len(tool_calls)}"
-                    )
-        log.warning(
-            f"[TUI] Chat stream ended after {chunk_count} chunks, "
-            f"response={len(full_response)} chars"
-        )
-        duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-        performance_monitor.record_llm_response(duration_ms, True)
-
-        if tool_calls:
-            tool_names = [c.get("function", {}).get("name") for c in tool_calls]
-            log.warning(f"[TUI] Tool calls detected: {tool_names}")
-            streaming_bubble.finish()
-            self.messages.append(
-                {"role": "assistant", "content": full_response, "tool_calls": tool_calls}
-            )
-            # Push intermediate response to streaming interface
-            await streaming_interface.push_assistant_message(full_response)
-            await conversation_buffer.add_message(
-                {"role": "assistant", "content": full_response, "tool_calls": tool_calls}
-            )
-
-            tool_results = await self.process_tool_calls(tool_calls, tool_activity)
-            log.warning(f"[TUI] Tool results received: {len(tool_results)} results")
-            for i, tr in enumerate(tool_results):
-                content = tr.get("content", "")
-                log.warning(
-                    f"[TUI] Tool result {i}: {len(content)} chars - preview: {content[:200]}..."
-                )
-            self.messages.extend(tool_results)
-
-            is_vision_tool = "screenshot_analyze" in tool_names
-            if is_vision_tool and tool_results:
-                try:
-                    vision_data = json.loads(tool_results[0].get("content", "{}"))
-                    full_response = vision_data.get("analysis", "")
-                    log.warning(f"[TUI] Using vision response directly: {len(full_response)} chars")
-                    streaming_bubble.text_content = ""
-                    streaming_bubble._done = False
-                    streaming_bubble.append_text(full_response)
-                    chat.scroll_end()
-                except Exception as e:
-                    log.warning(f"[TUI] Failed to extract vision response: {e}")
-                    is_vision_tool = False
-
-            if not is_vision_tool:
-                log.warning(f"[TUI] Starting second LLM pass with {len(self.messages)} messages")
-                full_response = ""
-                streaming_bubble.text_content = ""
-                streaming_bubble._done = False
-                second_pass_chunks = 0
-                async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT):
-                    second_pass_chunks += 1
-                    if msg := chunk.get("message", {}):
-                        if content := msg.get("content"):
-                            log.info(
-                                f"[TUI] Second pass chunk {second_pass_chunks}: "
-                                f"{len(content)} chars"
-                            )
-                            full_response += content
-                            streaming_bubble.append_text(content)
-                            chat.scroll_end()
-                log.warning(
-                    f"[TUI] Second pass ended after {second_pass_chunks} chunks, "
-                    f"response={len(full_response)} chars"
-                )
-
-        streaming_bubble.finish()
-        # Remove the streaming bubble and add the final message via streaming interface
-        streaming_bubble.remove()
-        self.messages.append({"role": "assistant", "content": full_response})
-        # Push final response to streaming interface (will trigger add_message via listener)
-        await streaming_interface.push_assistant_message(full_response)
-        await conversation_buffer.add_message({"role": "assistant", "content": full_response})
-
-        # Cache response if appropriate
-        if should_cache_response(user_input, full_response):
-            await intent_cache.set(cache_key, full_response)
-
-        if len(self.messages) > self._max_messages:
-            self.messages = self.messages[-self._max_messages :]
-        thinking.update("")
-        core.set_status("ONLINE")
-        tool_activity.clear()
-
-        if full_response:
-            core.set_status("SPEAKING")
-            try:
-                await self.tts.play_stream(full_response)
-            except Exception:
-                pass
-            core.set_status("ONLINE")
+        # Send to server for processing
+        await self.send_message_to_server(user_input)
 
     async def test_screenshot_display(self) -> None:
         """Test capturing and displaying a screenshot without analysis"""
@@ -2046,6 +2140,9 @@ StreamingBubble {
                 status.update_service("voice", True)
                 self.show_notification("Voice enabled", "success")
 
+    def action_show_performance(self) -> None:
+        self.app.push_screen(PerformanceScreen())
+
     def action_cancel(self) -> None:
         # First try to cancel screenshot overlay
         try:
@@ -2084,6 +2181,8 @@ StreamingBubble {
                 status = self.query_one("#system-status", SystemStatus)
                 status.set_model(model_id.split(":")[-1] if ":" in model_id else model_id)
                 self.show_notification(f"Model: {model_id}", "success")
+                # Send model change to server
+                asyncio.create_task(self.set_server_model(model_id))
                 if self.voice_assistant:
                     if model_id == "auto":
                         self.voice_assistant.set_model("auto", "")
@@ -2116,6 +2215,8 @@ StreamingBubble {
         # Only clean up attributes if they exist (for full JarvisApp)
         if hasattr(self, "_voice_task") and self._voice_task:
             self._voice_task.cancel()
+        if hasattr(self, "_health_check_task") and self._health_check_task:
+            self._health_check_task.cancel()
         if hasattr(self, "voice_assistant") and self.voice_assistant:
             await self.voice_assistant.stop()
         if hasattr(self, "ollama"):
@@ -2129,14 +2230,14 @@ def setup_logging(debug: bool = False) -> None:
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
-    # Reduce verbosity of HTTP libraries
+    # Reduce verbosity of HTTP and websocket libraries
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("websockets").setLevel(logging.WARNING)
 
     if not root_logger.handlers:
         root_logger.addHandler(TextualHandler())
 
-    # Always write debug logs to file when debug is enabled
     if debug:
         console = Console(
             file=open("jarvis_debug.log", "w", encoding="utf-8"), width=120, force_terminal=True

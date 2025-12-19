@@ -106,7 +106,7 @@ class IntentCache(ResponseCache):
     def _generate_key(self, user_input: str, context: str = None) -> str:
         """Generate intent-based cache key"""
         # Extract key words for intent matching
-        words = user_input.lower().split()
+        # words = user_input.lower().split()
         # key_words = [w for w in words if len(w) > 2 and not w.startswith("/")]
 
         # Common queries that can be cached

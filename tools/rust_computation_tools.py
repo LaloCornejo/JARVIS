@@ -14,27 +14,19 @@ class RustDataProcessorTool(BaseTool):
             "operation": {
                 "type": "string",
                 "description": "Operation to perform (sort, filter, aggregate, transform)",
-                "enum": ["sort", "filter", "aggregate", "transform"]
+                "enum": ["sort", "filter", "aggregate", "transform"],
             },
             "data": {
                 "type": "array",
                 "items": {"type": "object"},
-                "description": "Data to process"
+                "description": "Data to process",
             },
-            "options": {
-                "type": "object",
-                "description": "Operation-specific options"
-            }
+            "options": {"type": "object", "description": "Operation-specific options"},
         },
         "required": ["operation", "data"],
     }
 
-    async def execute(
-        self,
-        operation: str,
-        data: list,
-        options: dict = None
-    ) -> ToolResult:
+    async def execute(self, operation: str, data: list, options: dict = None) -> ToolResult:
         try:
             # For demonstration, we'll use Python implementation
             # In a real scenario, this would call a high-performance Rust binary
@@ -46,6 +38,7 @@ class RustDataProcessorTool(BaseTool):
     def _process_data(self, operation: str, data: list, options: dict) -> dict:
         """Process data using optimized algorithms"""
         import time
+
         start_time = time.time()
 
         if operation == "sort":
@@ -62,7 +55,9 @@ class RustDataProcessorTool(BaseTool):
         elif operation == "aggregate":
             field = options.get("field", "")
             agg_type = options.get("type", "sum")
-            values = [item.get(field, 0) for item in data if isinstance(item.get(field, 0), (int, float))]
+            values = [
+                item.get(field, 0) for item in data if isinstance(item.get(field, 0), (int, float))
+            ]
             if agg_type == "sum":
                 result = sum(values)
             elif agg_type == "average":
@@ -87,7 +82,7 @@ class RustDataProcessorTool(BaseTool):
             "result": result,
             "operation": operation,
             "item_count": len(data),
-            "duration_ms": duration
+            "duration_ms": duration,
         }
 
     def _evaluate_condition(self, item: dict, condition: str) -> bool:
@@ -109,7 +104,7 @@ class RustDataProcessorTool(BaseTool):
                 return str(item.get(field, "")) == value
             else:
                 return True
-        except:
+        except Exception:
             return True
 
 
@@ -117,7 +112,9 @@ class RustTextAnalyzerTool(BaseTool):
     """High-performance text analysis tool using Rust implementation"""
 
     name = "rust_text_analyzer"
-    description = "Analyze text complexity and extract insights using high-performance Rust implementation"
+    description = (
+        "Analyze text complexity and extract insights using high-performance Rust implementation"
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -128,17 +125,13 @@ class RustTextAnalyzerTool(BaseTool):
             "analysis_type": {
                 "type": "string",
                 "description": "Type of analysis to perform",
-                "enum": ["complexity", "sentiment", "keywords", "summary"]
-            }
+                "enum": ["complexity", "sentiment", "keywords", "summary"],
+            },
         },
         "required": ["text", "analysis_type"],
     }
 
-    async def execute(
-        self,
-        text: str,
-        analysis_type: str
-    ) -> ToolResult:
+    async def execute(self, text: str, analysis_type: str) -> ToolResult:
         try:
             # For demonstration, we'll use Python implementation
             # In a real scenario, this would call a high-performance Rust binary
@@ -156,12 +149,11 @@ class RustTextAnalyzerTool(BaseTool):
         start_time = time.time()
 
         # Basic text statistics
-        sentences = re.split(r'[.!?]+', text)
+        sentences = re.split(r"[.!?]+", text)
         sentences = [s.strip() for s in sentences if s.strip()]
-        words = re.findall(r'\b\w+\b', text.lower())
+        words = re.findall(r"\b\w+\b", text.lower())
         word_count = len(words)
         sentence_count = len(sentences)
-        char_count = len(text)
 
         if analysis_type == "complexity":
             # Simplified readability score
@@ -179,20 +171,40 @@ class RustTextAnalyzerTool(BaseTool):
                 "complexity_score": round(complexity_score, 2),
                 "word_count": word_count,
                 "sentence_count": sentence_count,
-                "avg_words_per_sentence": round(avg_words_per_sentence, 2) if sentence_count > 0 else 0,
-                "lexical_diversity": round(lexical_diversity, 4) if word_count > 0 else 0
+                "avg_words_per_sentence": round(avg_words_per_sentence, 2)
+                if sentence_count > 0
+                else 0,
+                "lexical_diversity": round(lexical_diversity, 4) if word_count > 0 else 0,
             }
 
         elif analysis_type == "sentiment":
             # Very basic sentiment analysis (would use proper NLP in reality)
-            positive_words = {"good", "great", "excellent", "amazing", "wonderful", "fantastic", "awesome"}
-            negative_words = {"bad", "terrible", "awful", "horrible", "worst", "disappointing", "poor"}
+            positive_words = {
+                "good",
+                "great",
+                "excellent",
+                "amazing",
+                "wonderful",
+                "fantastic",
+                "awesome",
+            }
+            negative_words = {
+                "bad",
+                "terrible",
+                "awful",
+                "horrible",
+                "worst",
+                "disappointing",
+                "poor",
+            }
 
             positive_count = sum(1 for word in words if word in positive_words)
             negative_count = sum(1 for word in words if word in negative_words)
 
             if positive_count + negative_count > 0:
-                sentiment_score = (positive_count - negative_count) / (positive_count + negative_count)
+                sentiment_score = (positive_count - negative_count) / (
+                    positive_count + negative_count
+                )
             else:
                 sentiment_score = 0
 
@@ -200,27 +212,43 @@ class RustTextAnalyzerTool(BaseTool):
                 "sentiment_score": round(sentiment_score, 4),
                 "positive_words": positive_count,
                 "negative_words": negative_count,
-                "neutral": word_count - positive_count - negative_count
+                "neutral": word_count - positive_count - negative_count,
             }
 
         elif analysis_type == "keywords":
             # Extract most common words (excluding common stop words)
-            stop_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by"}
+            stop_words = {
+                "the",
+                "a",
+                "an",
+                "and",
+                "or",
+                "but",
+                "in",
+                "on",
+                "at",
+                "to",
+                "for",
+                "of",
+                "with",
+                "by",
+            }
             filtered_words = [word for word in words if word not in stop_words and len(word) > 2]
             word_freq = Counter(filtered_words)
             top_keywords = dict(word_freq.most_common(10))
 
-            result = {
-                "keywords": top_keywords,
-                "unique_words": len(set(filtered_words))
-            }
+            result = {"keywords": top_keywords, "unique_words": len(set(filtered_words))}
 
         elif analysis_type == "summary":
             # Very basic extractive summary (first and last sentences)
             if sentences:
                 summary_sentences = []
                 if len(sentences) >= 3:
-                    summary_sentences = [sentences[0], sentences[len(sentences)//2], sentences[-1]]
+                    summary_sentences = [
+                        sentences[0],
+                        sentences[len(sentences) // 2],
+                        sentences[-1],
+                    ]
                 elif len(sentences) >= 2:
                     summary_sentences = [sentences[0], sentences[-1]]
                 else:
@@ -229,7 +257,7 @@ class RustTextAnalyzerTool(BaseTool):
                 result = {
                     "summary": " ".join(summary_sentences),
                     "original_length": len(text),
-                    "summary_length": len(" ".join(summary_sentences))
+                    "summary_length": len(" ".join(summary_sentences)),
                 }
             else:
                 result = {"summary": "", "original_length": 0, "summary_length": 0}

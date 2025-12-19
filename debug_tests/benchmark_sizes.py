@@ -6,7 +6,9 @@ from tools.integrations.screenshot import get_screenshot_manager
 
 
 async def benchmark_size(size, name, enhanced=False):
-    print(f"\n=== Testing {name} ({size[0]}x{size[1]}){' with enhancement' if enhanced else ''} ===")
+    print(
+        f"\n=== Testing {name} ({size[0]}x{size[1]}){' with enhancement' if enhanced else ''} ==="
+    )
     manager = get_screenshot_manager()
 
     # Capture screenshot
@@ -26,6 +28,7 @@ async def benchmark_size(size, name, enhanced=False):
         import io
 
         from PIL import Image
+
         img = Image.open(path)
         img.thumbnail(size, Image.Resampling.LANCZOS)
         if img.mode in ("RGBA", "LA", "P"):
@@ -77,6 +80,7 @@ async def benchmark_size(size, name, enhanced=False):
         print(f"ERROR after {total_time:.2f}s: {e}")
         return None
 
+
 async def benchmark_all():
     sizes = [
         ((320, 240), "Very Small"),
@@ -111,6 +115,7 @@ async def benchmark_all():
             print(f"{name}: {time_taken:.2f}s")
         else:
             print(f"{name}: TIMEOUT/ERROR")
+
 
 if __name__ == "__main__":
     asyncio.run(benchmark_all())
