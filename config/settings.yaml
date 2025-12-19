@@ -21,7 +21,7 @@ gemini:
 
 ollama:
   api_url: http://localhost:11434
-  vision_model: huihui_ai/qwen3-vl-abliterated:4b
+  vision_model: huihui_ai/qwen3-vl-abliterated:8b-instruct
   fast_model: qwen3:1.7b
   preload: true
 

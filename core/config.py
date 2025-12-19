@@ -39,7 +39,7 @@ class Config:
 
     @property
     def llm_vision_model(self) -> str:
-        return self.get("llm.vision_model", "huihui_ai/qwen3-vl-abliterated:4b")
+        return self.get("llm.vision_model", "huihui_ai/qwen3-vl-abliterated:8b-instruct ")
 
     def llm_fast_model(self) -> str:
         return self.get("llm.fast_model", "qwen3:1.7b")

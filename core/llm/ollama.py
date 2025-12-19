@@ -11,7 +11,7 @@ log = logging.getLogger("jarvis.ollama")
 
 MODEL_CONTEXT_WINDOWS = {
     "qwen3:1.7b": 32768,
-    "huihui_ai/qwen3-vl-abliterated:4b": 32768,
+    "huihui_ai/qwen3-vl-abliterated:8b-instruct": 32768,
     "gpt-oss": 32768,
 }
 DEFAULT_NUM_CTX = 16384
