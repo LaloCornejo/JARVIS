@@ -7,6 +7,13 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
+try:
+    import psutil
+
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
 log = logging.getLogger("jarvis.cache")
 
 
@@ -19,6 +26,10 @@ class ResponseCache:
         self.cache: Dict[str, Dict[str, Any]] = {}
         self.access_times: Dict[str, float] = {}
         self._lock = asyncio.Lock()
+
+        # Memory management
+        self._memory_threshold_mb = 800  # Start evicting when memory exceeds 800MB
+        self._critical_memory_threshold_mb = 1200  # Aggressive eviction above 1.2GB
 
     def _generate_key(self, prompt: str, system: str = None, **kwargs) -> str:
         """Generate cache key from request parameters"""
@@ -46,6 +57,9 @@ class ResponseCache:
     async def set(self, key: str, data: Any) -> None:
         """Store response in cache with TTL"""
         async with self._lock:
+            # Check memory pressure before adding new entries
+            await self._manage_memory_pressure()
+
             # Remove entries if cache is full
             if len(self.cache) >= self.max_size:
                 self._evict_lru_entry()
@@ -55,6 +69,76 @@ class ResponseCache:
                 "data": data,
                 "expires_at": expires_at,
                 "created_at": datetime.now().isoformat(),
+            }
+            self.access_times[key] = time.time()
+            log.debug(f"Cached response for key: {key[:8]}...")
+
+    async def _manage_memory_pressure(self) -> None:
+        """Manage cache size based on system memory pressure"""
+        if not PSUTIL_AVAILABLE:
+            return
+
+        try:
+            import os
+
+            process = psutil.Process(os.getpid())
+            memory_mb = process.memory_info().rss / 1024 / 1024
+
+            # Apply memory pressure strategies based on usage
+            if memory_mb > self._critical_memory_threshold_mb:
+                # Critical memory pressure - aggressively evict cache entries
+                eviction_count = min(len(self.cache) // 2, 20)  # Evict half or max 20 entries
+                for _ in range(eviction_count):
+                    if self.cache:
+                        self._evict_lru_entry()
+                if eviction_count > 0:
+                    log.debug(
+                        f"Critical memory pressure ({memory_mb:.1f}MB): Evicted {eviction_count} cache entries"
+                    )
+            elif memory_mb > self._memory_threshold_mb:
+                # Moderate memory pressure - gently evict oldest entries
+                if len(self.cache) > self.max_size // 2:
+                    self._evict_lru_entry()
+                    log.debug(
+                        f"Moderate memory pressure ({memory_mb:.1f}MB): Evicted 1 cache entry"
+                    )
+        except Exception as e:
+            log.debug(f"Memory pressure management failed: {e}")
+
+    def _remove_expired_entry(self, key: str) -> None:
+        """Remove a single expired entry"""
+        self.cache.pop(key, None)
+        self.access_times.pop(key, None)
+
+    def _evict_lru_entry(self) -> None:
+        """Remove least recently used entry"""
+        if self.access_times:
+            lru_key = min(self.access_times, key=self.access_times.get)
+            self._remove_expired_entry(lru_key)
+            log.debug(f"Evicted LRU entry: {lru_key[:8]}...")
+
+    async def clear(self) -> None:
+        """Clear all cache entries"""
+        async with self._lock:
+            self.cache.clear()
+            self.access_times.clear()
+            log.info("Response cache cleared")
+
+    async def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics"""
+        async with self._lock:
+            now = datetime.now()
+            valid_entries = sum(
+                1
+                for entry in self.cache.values()
+                if datetime.fromisoformat(entry["expires_at"]) > now
+            )
+            return {
+                "total_entries": len(self.cache),
+                "valid_entries": valid_entries,
+                "eviction_count": len(self.access_times) - valid_entries,
+                "max_size": self.max_size,
+                "ttl_seconds": self.ttl_seconds,
             }
             self.access_times[key] = time.time()
             log.debug(f"Cached response for key: {key[:8]}...")
@@ -101,7 +185,7 @@ class IntentCache(ResponseCache):
 
     def __init__(self):
         # Lower TTL for dynamic responses, higher size for intent caching
-        super().__init__(max_size=200, ttl_seconds=180)
+        super().__init__(max_size=100, ttl_seconds=180)  # Reduced from 200 to decrease memory usage
 
     def _generate_key(self, user_input: str, context: str = None) -> str:
         """Generate intent-based cache key"""
@@ -142,7 +226,7 @@ class ToolResponseCache(ResponseCache):
 
     def __init__(self):
         # Cache tool results for longer since they're often slower
-        super().__init__(max_size=150, ttl_seconds=600)
+        super().__init__(max_size=75, ttl_seconds=600)  # Reduced from 150 to decrease memory usage
 
     def generate_tool_cache_key(self, tool_name: str, args: Dict[str, Any]) -> str:
         """Generate cache key for tool responses"""

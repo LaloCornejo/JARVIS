@@ -5,6 +5,7 @@ Tracks key metrics to help identify bottlenecks and optimize the system.
 """
 
 import asyncio
+import gc
 import logging
 import statistics
 import time
@@ -66,6 +67,11 @@ class PerformanceMonitor:
         self.enabled = True
         self.start_time = time.time()
 
+        # Memory management
+        self._memory_threshold_mb = 1000  # Trigger GC when memory exceeds 1GB
+        self._last_gc_time = 0
+        self._gc_cooldown_seconds = 30  # Minimum time between GC runs
+
         # Track various performance aspects
         self._init_tui_metrics()
         self._init_llm_metrics()
@@ -124,6 +130,8 @@ class PerformanceMonitor:
             {
                 "memory_usage": Metric("Memory Usage", "MB"),
                 "cpu_usage": Metric("CPU Usage", "percent"),
+                "gc_collections": Metric("GC Collections", "collections"),
+                "gc_collected": Metric("GC Collected Objects", "objects"),
             }
         )
 
@@ -180,7 +188,7 @@ class PerformanceMonitor:
         log.debug(f"Cache {cache_type}: {'hit' if hit else 'miss'}")
 
     def record_system_stats(self) -> None:
-        """Record current system statistics"""
+        """Record current system statistics and manage memory pressure"""
         if not self.enabled:
             return
 
@@ -194,6 +202,9 @@ class PerformanceMonitor:
             memory_mb = process.memory_info().rss / 1024 / 1024
             self.metrics["memory_usage"].record(memory_mb)
 
+            # Check for memory pressure and trigger garbage collection if needed
+            self._manage_memory_pressure(memory_mb)
+
             # CPU usage percentage
             cpu_percent = process.cpu_percent(interval=0.1)
             self.metrics["cpu_usage"].record(cpu_percent)
@@ -204,6 +215,39 @@ class PerformanceMonitor:
             pass
         except Exception as e:
             log.debug(f"Failed to record system stats: {e}")
+
+    def _manage_memory_pressure(self, current_memory_mb: float) -> None:
+        """Manage memory pressure by triggering garbage collection when needed"""
+        current_time = time.time()
+
+        # Check if we should trigger garbage collection
+        if (
+            current_memory_mb > self._memory_threshold_mb
+            and current_time - self._last_gc_time > self._gc_cooldown_seconds
+        ):
+            # Log memory pressure situation
+            log.debug(
+                f"Memory pressure detected: {current_memory_mb:.1f}MB > {self._memory_threshold_mb}MB"
+            )
+
+            # Perform garbage collection
+            collected = gc.collect()
+            uncollectable = gc.garbage
+
+            # Record GC activity
+            if "gc_collections" not in self.metrics:
+                self.metrics["gc_collections"] = Metric("GC Collections", "collections")
+                self.metrics["gc_collected"] = Metric("GC Collected Objects", "objects")
+
+            self.metrics["gc_collections"].record(1.0)
+            self.metrics["gc_collected"].record(float(collected))
+
+            log.debug(
+                f"Garbage collection: {collected} objects collected, {len(uncollectable)} uncollectable"
+            )
+
+            # Update last GC time
+            self._last_gc_time = current_time
 
     def get_stats(self) -> Dict[str, Any]:
         """Get all performance statistics"""
@@ -265,6 +309,12 @@ class PerformanceMonitor:
         cpu_stats = stats.get("cpu_usage", {})
         if not cpu_stats.get("empty", False):
             lines.append(f"CPU Usage: {cpu_stats.get('current', 0):.1f}%")
+
+        # Garbage Collection
+        gc_stats = stats.get("gc_collected", {})
+        if not gc_stats.get("empty", False):
+            total_collected = gc_stats.get("samples", 0)
+            lines.append(f"GC Objects Collected: {int(total_collected)}")
 
         return "\n".join(lines)
 

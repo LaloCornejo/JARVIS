@@ -32,7 +32,7 @@ class JarvisServer:
         self.tools = get_tool_registry()
         self.tts = TextToSpeech()
         self.messages: List[Dict[str, Any]] = []
-        self._max_messages = 100
+        self._max_messages = 25  # Reduced from 100 to decrease memory usage
         self._selected_model = ("auto", "AUTO - Smart Selection")
 
     def _resolve_model(self) -> str:

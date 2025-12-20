@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::error::Error;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read};

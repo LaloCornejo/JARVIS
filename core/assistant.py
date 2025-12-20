@@ -109,8 +109,11 @@ class VoiceAssistant:
         self._silence_frames = 0
         self._silence_threshold = int(1.5 * self._sample_rate / self._chunk_size)
         self._min_audio_chunks = 50
-        self._messages: list[dict] = []
-        self._max_messages = 50
+        # Use shared conversation buffer instead of local messages list
+        from core.streaming_interface import conversation_buffer
+
+        self._conversation_buffer = conversation_buffer
+        self._max_messages = 25  # Reduced from 50 to decrease memory usage
         self._on_state_change: Callable[[AssistantState], None] | None = None
         self._on_transcription: Callable[[str], None] | None = None
         self._on_partial_transcription: Callable[[str], None] | None = None
@@ -186,7 +189,7 @@ class VoiceAssistant:
 
     async def generate_response(self, text: str) -> str | None:
         log.info("generate_response called with: %s", text)
-        self._messages.append({"role": "user", "content": text})
+        await self._conversation_buffer.add_message({"role": "user", "content": text})
 
         # Automatically recall relevant memories
         relevant_memories = await self._recall_relevant_memories(text)
@@ -227,8 +230,13 @@ class VoiceAssistant:
             client = self.ollama
             client.model = model
 
+            # Get recent messages from shared buffer for context
+            recent_messages = await self._conversation_buffer.get_recent_messages(
+                self._max_messages
+            )
+
             async for chunk in client.chat(
-                messages=self._messages,
+                messages=recent_messages,
                 system=system_prompt,
                 tools=tool_schemas,
             ):
@@ -250,12 +258,13 @@ class VoiceAssistant:
             if tool_calls and self.tools:
                 tool_names = [c.get("function", {}).get("name") for c in tool_calls]
                 log.info("Processing %d tool calls: %s", len(tool_calls), tool_names)
-                self._messages.append(
+                await self._conversation_buffer.add_message(
                     {"role": "assistant", "content": full_response, "tool_calls": tool_calls}
                 )
                 tool_results = await self._process_tool_calls(tool_calls)
                 log.info("Tool results: %d messages", len(tool_results))
-                self._messages.extend(tool_results)
+                for result in tool_results:
+                    await self._conversation_buffer.add_message(result)
 
                 is_vision_tool = "screenshot_analyze" in tool_names
                 if is_vision_tool and tool_results:
@@ -270,8 +279,13 @@ class VoiceAssistant:
                 if not is_vision_tool:
                     log.info("Starting second LLM pass to summarize tool results")
                     full_response = ""
+                    # Get recent messages from shared buffer for context
+                    recent_messages = await self._conversation_buffer.get_recent_messages(
+                        self._max_messages
+                    )
+
                     async for chunk in client.chat(
-                        messages=self._messages,
+                        messages=recent_messages,
                         system=system_prompt,
                     ):
                         if self._interrupted:
@@ -298,13 +312,21 @@ class VoiceAssistant:
             log.info("Found %d tool calls in response text", len(additional_tool_calls))
             tool_calls.extend(additional_tool_calls)
             # Re-process tool calls
-            self._messages.append({"role": "assistant", "content": full_response})
+            await self._conversation_buffer.add_message(
+                {"role": "assistant", "content": full_response}
+            )
             tool_results = await self._process_tool_calls(tool_calls)
-            self._messages.extend(tool_results)
+            for result in tool_results:
+                await self._conversation_buffer.add_message(result)
             # Generate final response
             full_response = ""
+            # Get recent messages from shared buffer for context
+            recent_messages = await self._conversation_buffer.get_recent_messages(
+                self._max_messages
+            )
+
             async for chunk in client.chat(
-                messages=self._messages,
+                messages=recent_messages,
                 system=system_prompt,
             ):
                 if self._interrupted:
@@ -315,10 +337,7 @@ class VoiceAssistant:
                         full_response += content
             log.info("Final response after tool calls: %d chars", len(full_response))
 
-        self._messages.append({"role": "assistant", "content": full_response})
-
-        if len(self._messages) > self._max_messages:
-            self._messages = self._messages[-self._max_messages :]
+        await self._conversation_buffer.add_message({"role": "assistant", "content": full_response})
 
         log.debug(
             "Response: %s",

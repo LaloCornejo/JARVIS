@@ -135,7 +135,7 @@ class StreamingInterface:
 class ConversationBuffer:
     """Buffers conversation history for efficient access"""
 
-    def __init__(self, max_messages: int = 50):
+    def __init__(self, max_messages: int = 25):  # Reduced from 50 to decrease memory usage
         self.max_messages = max_messages
         self.messages = []
         self.lock = asyncio.Lock()
