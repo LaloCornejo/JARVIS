@@ -62,3 +62,9 @@ NUL
 
 # uv lock file
 uv.lock
+
+# 2dModels
+2dModels/
+
+# public 
+public/
