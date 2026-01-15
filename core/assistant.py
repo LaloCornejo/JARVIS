@@ -17,9 +17,12 @@ from core.learning.improvement import SelfImprovement
 from core.llm import ModelRouter, OllamaClient
 from core.llm.copilot import CopilotClient
 from core.llm.gemini import GeminiClient
+from core.memory.semantic_memory import get_enhanced_memory
 from core.proactive import ProactiveMonitor
+from core.reasoning import get_planner, get_reasoner
 from core.security.permissions import PermissionManager
 from core.threading_manager import StreamManager, TaskCoordinator, ThreadingManager
+from core.vision import get_vision_processor
 from core.voice.stt import SpeechToText
 from core.voice.tts import TextToSpeech
 from core.voice.vad import VoiceActivityDetector
@@ -96,6 +99,12 @@ class VoiceAssistant:
         self.permissions = PermissionManager(data_dir / "permissions.db")
         self.proactive = ProactiveMonitor()
 
+        # Phase 1: Core Intelligence Enhancements
+        self.vision_processor = None  # Initialize lazily
+        self.enhanced_memory = None  # Initialize lazily
+        self.reasoner = None  # Initialize lazily
+        self.planner = None  # Initialize lazily
+
         # Concurrency management
         self.threading_manager = ThreadingManager()
         self.task_coordinator = TaskCoordinator()
@@ -107,7 +116,9 @@ class VoiceAssistant:
         self._sample_rate = 16000
         self._chunk_size = 512
         self._silence_frames = 0
-        self._silence_threshold = int(1.5 * self._sample_rate / self._chunk_size)
+        self._silence_threshold = int(
+            0.5 * self._sample_rate / self._chunk_size
+        )  # Reduced for debugging
         self._min_audio_chunks = 50
         # Use shared conversation buffer instead of local messages list
         from core.streaming_interface import conversation_buffer
@@ -126,7 +137,32 @@ class VoiceAssistant:
         self._transcribe_interval = 30
         self._last_transcription = ""
         self._forced_model: tuple[str, str] | None = None
-        log.debug("VoiceAssistant initialized")
+
+    async def _get_vision_processor(self):
+        """Get vision processor (lazy initialization)"""
+        if self.vision_processor is None:
+            from core.vision import get_vision_processor
+
+            self.vision_processor = await get_vision_processor()
+        return self.vision_processor
+
+    async def _get_enhanced_memory(self):
+        """Get enhanced memory system (lazy initialization)"""
+        if self.enhanced_memory is None:
+            self.enhanced_memory = await get_enhanced_memory()
+        return self.enhanced_memory
+
+    async def _get_reasoner(self):
+        """Get reasoning system (lazy initialization)"""
+        if self.reasoner is None:
+            self.reasoner = await get_reasoner()
+        return self.reasoner
+
+    async def _get_planner(self):
+        """Get planning system (lazy initialization)"""
+        if self.planner is None:
+            self.planner = await get_planner()
+        return self.planner
 
     def set_model(self, backend: str, model: str) -> None:
         if backend == "auto":
@@ -137,8 +173,14 @@ class VoiceAssistant:
             log.info("Voice model forced to: %s/%s", backend, model)
 
     def set_state(self, state: AssistantState) -> None:
-        log.info("State changing: %s -> %s", self.state, state)
+        old_state = self.state
+        log.info("State changing: %s -> %s", old_state, state)
         self.state = state
+
+        # Stop audio stream when transitioning out of LISTENING state
+        if old_state == AssistantState.LISTENING and state != AssistantState.LISTENING:
+            self._stop_audio_stream()
+
         if self._on_state_change:
             log.debug("Calling state change callback")
             self._on_state_change(state)
@@ -369,6 +411,15 @@ class VoiceAssistant:
             "Deduplicated %d tool calls to %d unique tools", len(tool_calls), len(unique_calls)
         )
 
+        if len(unique_calls) <= 1:
+            # Single tool call - use sequential execution for simplicity
+            return await self._process_tool_calls_sequential(unique_calls)
+
+        # Multiple tool calls - try parallel execution
+        return await self._process_tool_calls_parallel(unique_calls)
+
+    async def _process_tool_calls_sequential(self, unique_calls: dict) -> list[dict]:
+        """Process tool calls sequentially (fallback for single or dependent calls)"""
         results = []
         for name, call in unique_calls.items():
             fn = call.get("function", {})
@@ -391,6 +442,143 @@ class VoiceAssistant:
             )
 
         return results
+
+    async def _process_tool_calls_parallel(self, unique_calls: dict) -> list[dict]:
+        """Process independent tool calls in parallel for maximum performance"""
+        # Group tools by dependency and execution characteristics
+        independent_groups = self._group_independent_tools(unique_calls)
+
+        all_results = []
+
+        # Process each group in parallel
+        for group in independent_groups:
+            if len(group) == 1:
+                # Single tool in group - execute directly
+                name, call = group[0]
+                result = await self._execute_single_tool(call)
+                all_results.append(result)
+            else:
+                # Multiple tools in group - execute in parallel
+                log.info("Executing %d tools in parallel", len(group))
+
+                # Create concurrent tasks for this group
+                tasks = []
+                for name, call in group:
+                    task = asyncio.create_task(self._execute_single_tool_async(call))
+                    tasks.append(task)
+
+                # Wait for all tools in this group to complete
+                group_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Process results (handle exceptions)
+                for i, result in enumerate(group_results):
+                    if isinstance(result, Exception):
+                        name, call = group[i]
+                        log.error("Tool %s failed with exception: %s", name, result)
+                        # Create error result
+                        tool_call_id = call.get("id", "")
+                        result = {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "content": json.dumps({"error": str(result)}),
+                        }
+                    all_results.append(result)
+
+        return all_results
+
+    def _group_independent_tools(self, unique_calls: dict) -> list[list[tuple[str, dict]]]:
+        """Group tools that can be executed independently"""
+        # Define tool categories and their execution constraints
+        sequential_tools = {
+            # Tools that must run sequentially due to shared resources
+            "system_control",
+            "volume_control",
+            "spotify",
+            "vlc",
+            "docker",
+            "obsidian",
+            "gmail",
+            "calendar",
+        }
+
+        read_only_tools = {
+            # Read-only tools that can run in parallel
+            "web_search",
+            "fetch_url",
+            "github_list",
+            "github_search",
+            "screenshot",
+            "clipboard_paste",
+            "clipboard_history",
+            "memory_recall",
+            "memory_list",
+            "time_current",
+        }
+
+        # Categorize tools
+        sequential_group = []
+        parallel_groups = []
+
+        for name, call in unique_calls.items():
+            fn = call.get("function", {})
+            tool_name = fn.get("name", "")
+
+            # Extract base tool category (remove suffixes like _tool)
+            base_category = (
+                tool_name.lower().split("_")[0] if "_" in tool_name else tool_name.lower()
+            )
+
+            if any(seq in base_category for seq in sequential_tools):
+                # Sequential tools go in their own group
+                sequential_group.append((name, call))
+            else:
+                # Check if it's a read-only tool that can be parallelized
+                is_read_only = any(ro in base_category for ro in read_only_tools) or tool_name in [
+                    "get_current_time",
+                    "list_open_apps",
+                    "list_memory_categories",
+                ]
+
+                if is_read_only:
+                    # Add to first parallel group or create new one
+                    if not parallel_groups:
+                        parallel_groups.append([])
+                    parallel_groups[0].append((name, call))
+                else:
+                    # Other tools - each gets its own parallel group for safety
+                    parallel_groups.append([(name, call)])
+
+        # Return sequential groups first, then parallel groups
+        result_groups = []
+        if sequential_group:
+            result_groups.append(sequential_group)
+
+        result_groups.extend(parallel_groups)
+        return result_groups
+
+    async def _execute_single_tool(self, call: dict) -> dict:
+        """Execute a single tool call synchronously"""
+        fn = call.get("function", {})
+        name = fn.get("name", "")
+        args = fn.get("arguments", {})
+        tool_call_id = call.get("id", "")
+
+        if isinstance(args, str):
+            args = json.loads(args) if args.strip() else {}
+
+        log.info("Executing tool: %s with args: %s", name, args)
+        result = await self.tools.execute(name, **args)
+        log.info("Tool result: %s", result)
+
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": json.dumps(result.data if result.success else {"error": result.error}),
+        }
+
+    async def _execute_single_tool_async(self, call: dict) -> dict:
+        """Execute a single tool call asynchronously (for parallel execution)"""
+        return await self._execute_single_tool(call)
 
     def _parse_tool_calls_from_text(self, response_text: str) -> list[dict]:
         """Parse tool calls embedded in the response text."""
@@ -448,7 +636,17 @@ class VoiceAssistant:
             self._loop.call_soon_threadsafe(lambda: asyncio.create_task(cancel_all_tasks()))
 
     async def handle_wake_word(self) -> None:
+        # If already listening, just reset the buffer and continue
+        if self.state == AssistantState.LISTENING:
+            log.info("Wake word detected while already listening - resetting buffer")
+            self._audio_buffer = []
+            self._silence_frames = 0
+            self._last_transcription = ""
+            return
+
+        # If in another state (like PROCESSING or SPEAKING), interrupt first
         if self.state != AssistantState.IDLE:
+            log.info("Wake word detected - interrupting current operation")
             self.interrupt()
             await asyncio.sleep(0.1)
 
@@ -473,7 +671,20 @@ class VoiceAssistant:
         is_speech = self.vad.is_speech(audio)
         if not is_speech:
             self._silence_frames += 1
+            if self._silence_frames % 10 == 0:  # Log every 10 silence frames
+                log.debug(
+                    "Silence frames: %d/%d, buffer size: %d",
+                    self._silence_frames,
+                    self._silence_threshold,
+                    len(self._audio_buffer),
+                )
         else:
+            if self._silence_frames > 0:
+                log.debug(
+                    "Speech detected after %d silence frames, buffer size: %d",
+                    self._silence_frames,
+                    len(self._audio_buffer),
+                )
             self._silence_frames = 0
 
         # Use coordinated task management for partial transcription
@@ -486,24 +697,21 @@ class VoiceAssistant:
                 "partial_transcription", self._do_partial_transcription()
             )
 
+        # Check for silence to trigger speech processing
+        max_chunks = int(5.0 * self._sample_rate / self._chunk_size)  # 5 second max
         if (
-            self._silence_frames >= self._silence_threshold
-            and len(self._audio_buffer) >= self._min_audio_chunks
-        ):
-            log.info("Silence detected, processing %d audio chunks", len(self._audio_buffer))
-            full_audio = np.concatenate(self._audio_buffer)
-            self._audio_buffer = []
-
-            # Use coordinated task management for main processing
-            await self.task_coordinator.start_task(
-                "process_and_respond", self._process_and_respond(full_audio)
+            (
+                self._silence_frames >= self._silence_threshold
+                and len(self._audio_buffer) >= self._min_audio_chunks
             )
-
-        if (
-            self._silence_frames >= self._silence_threshold
-            and len(self._audio_buffer) >= self._min_audio_chunks
+            or len(self._audio_buffer) >= max_chunks  # Timeout after 5 seconds
         ):
-            log.info("Silence detected, processing %d audio chunks", len(self._audio_buffer))
+            log.info(
+                "Triggering speech processing: %d audio chunks (%d silence frames, threshold %d)",
+                len(self._audio_buffer),
+                self._silence_frames,
+                self._silence_threshold,
+            )
             full_audio = np.concatenate(self._audio_buffer)
             self._audio_buffer = []
 
@@ -534,6 +742,7 @@ class VoiceAssistant:
     async def _process_and_respond(self, audio: np.ndarray) -> None:
         log.info("_process_and_respond called with %d samples", len(audio))
         try:
+            log.info("Calling process_speech_sync...")
             # Process speech synchronously (already runs in executor)
             text = self.process_speech_sync(audio)
 
@@ -628,8 +837,8 @@ class VoiceAssistant:
 
     def _start_audio_stream(self) -> None:
         """Start audio stream for speech capture after wake word"""
-        if hasattr(self, "_audio_stream") and self._audio_stream is not None:
-            return  # Already running
+        # Stop any existing stream first
+        self._stop_audio_stream()
 
         def audio_callback(indata: np.ndarray, frames: int, time_info: Any, status: Any) -> None:
             if self.state == AssistantState.LISTENING and self._audio_queue:
@@ -637,8 +846,8 @@ class VoiceAssistant:
                 audio_chunk = indata[:, 0].astype(np.float32)
                 try:
                     self._loop.call_soon_threadsafe(self._audio_queue.put_nowait, audio_chunk)
-                except Exception:
-                    pass  # Queue full or error
+                except Exception as e:
+                    log.warning("Failed to queue audio chunk: %s", e)
 
         try:
             self._audio_stream = sd.InputStream(
@@ -653,6 +862,19 @@ class VoiceAssistant:
             log.info("Audio stream started for speech capture")
         except Exception as e:
             log.error("Failed to start audio stream: %s", e)
+            self._audio_stream = None
+
+    def _stop_audio_stream(self) -> None:
+        """Stop the current audio stream"""
+        if hasattr(self, "_audio_stream") and self._audio_stream is not None:
+            try:
+                self._audio_stream.stop()
+                self._audio_stream.close()
+                log.debug("Audio stream stopped")
+            except Exception as e:
+                log.debug("Error stopping audio stream: %s", e)
+            finally:
+                self._audio_stream = None
 
     async def _process_audio_queue(self) -> None:
         while self._running:
@@ -661,6 +883,8 @@ class VoiceAssistant:
                 await self.handle_audio_chunk(audio)
             except asyncio.TimeoutError:
                 continue
+            except Exception as e:
+                log.error("Error in audio queue processing: %s", e)
 
     def _wake_callback(self) -> None:
         """Callback for wake word detection"""
@@ -739,3 +963,101 @@ class VoiceAssistant:
         results["vad"] = self.vad.health_check()
         results["wake_word"] = self.wake_word.health_check()
         return results
+
+    async def reason_about_complex_task(
+        self, task_description: str, context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Use enhanced reasoning for complex multi-step tasks"""
+        log.info(f"Starting enhanced reasoning for: {task_description}")
+
+        try:
+            planner = await self._get_planner()
+
+            # Analyze task complexity
+            complexity = await planner.analyze_task_complexity(task_description)
+
+            # Create reasoning chain
+            chain = await planner.plan_complex_task(
+                task_description=task_description,
+                task_type=complexity.get("approach", "general"),
+                constraints={"max_steps": complexity.get("recommended_max_steps", 10)},
+            )
+
+            # Execute the reasoning chain
+            # Note: In a full implementation, this would integrate with the tool system
+            # For now, we'll return the planning results
+
+            return {
+                "success": True,
+                "task_description": task_description,
+                "complexity_analysis": complexity,
+                "reasoning_chain": chain.to_dict(),
+                "recommendations": await self._generate_reasoning_recommendations(chain),
+            }
+
+        except Exception as e:
+            log.error(f"Enhanced reasoning failed: {e}")
+            return {"success": False, "error": str(e), "task_description": task_description}
+
+    async def _generate_reasoning_recommendations(self, chain) -> List[str]:
+        """Generate actionable recommendations from reasoning chain"""
+        recommendations = []
+
+        for step in chain.steps:
+            if step.action and step.expected_outcome:
+                recommendations.append(
+                    f"Execute '{step.action}' to achieve: {step.expected_outcome}"
+                )
+
+        return recommendations[:5]  # Limit to top 5 recommendations
+
+    async def analyze_image_with_vision(
+        self, image_data: Union[str, bytes], analysis_type: str = "comprehensive"
+    ) -> Dict[str, Any]:
+        """Use enhanced vision AI for image analysis"""
+        log.info(f"Starting vision analysis: {analysis_type}")
+
+        try:
+            vision_processor = await self._get_vision_processor()
+
+            result = await vision_processor.analyze_image(
+                image=image_data, analysis_type=analysis_type
+            )
+
+            return {"success": True, "analysis_type": analysis_type, "result": result}
+
+        except Exception as e:
+            log.error(f"Vision analysis failed: {e}")
+            return {"success": False, "error": str(e), "analysis_type": analysis_type}
+
+    async def search_memories_semantically(
+        self, query: str, limit: int = 5, include_context: bool = True
+    ) -> Dict[str, Any]:
+        """Use enhanced semantic memory search"""
+        log.info(f"Starting semantic memory search: {query}")
+
+        try:
+            memory_system = await self._get_enhanced_memory()
+
+            results = await memory_system.retrieve_relevant_memories(query=query, limit=limit)
+
+            return {
+                "success": True,
+                "query": query,
+                "results": results,
+                "total_found": len(results.get("semantic_results", []))
+                + len(results.get("contextual_results", [])),
+            }
+
+        except Exception as e:
+            log.error(f"Semantic memory search failed: {e}")
+            return {"success": False, "error": str(e), "query": query}
+
+    async def get_memory_insights(self, topic: str) -> Dict[str, Any]:
+        """Get comprehensive memory insights for a topic"""
+        try:
+            memory_system = await self._get_enhanced_memory()
+            return await memory_system.get_memory_insights(topic)
+        except Exception as e:
+            log.error(f"Memory insights failed: {e}")
+            return {"error": str(e)}

@@ -45,8 +45,9 @@ SYSTEM_PROMPT = """IMPORTANT: Never use emojis in your responses.\
 You are JARVIS, an intelligent AI assistant.
 You have female voice and speak in a clear and concise manner.
 You have access to many tools that you can use to help the user. Always use tools for screenshots,
-information retrieval, time queries, web searches, and any external data. When you need to perform actions
-or get information, use the appropriate tool. Always be direct and avoid unnecessary verbosity.
+information retrieval, time queries, web searches, and any external data. When you need to perform
+actions or get information, use the appropriate tool. Always be direct and avoid
+unnecessary verbosity.
 """
 
 CYBER_FRAMES = ["─"]
@@ -955,6 +956,61 @@ class JarvisApp(App):
         self._streaming_bubble: StreamingBubble | None = None
         self._current_theme = "opencode"
 
+        # TTS health tracking for optimization
+        self._tts_last_known_status = None  # None=unknown, True=online, False=offline
+        self._tts_last_check_time = 0
+        self._tts_health_check_interval = 300  # 5 minutes between checks when offline
+        self._tts_online_check_interval = 60  # 1 minute between checks when online
+
+    async def _should_check_tts_health(self) -> bool:
+        """Determine if we should check TTS health based on current state and timing"""
+        current_time = asyncio.get_event_loop().time()
+
+        # If we don't know the status yet, always check
+        if self._tts_last_known_status is None:
+            return True
+
+        # If TTS was offline, check less frequently (every 5 minutes)
+        if not self._tts_last_known_status:
+            return (current_time - self._tts_last_check_time) >= self._tts_health_check_interval
+
+        # If TTS was online, check periodically (every 1 minute) to catch disconnections
+        return (current_time - self._tts_last_check_time) >= self._tts_online_check_interval
+
+    async def _check_tts_health_optimized(self) -> bool:
+        """Optimized TTS health check that caches results and only checks when necessary"""
+        current_time = asyncio.get_event_loop().time()
+
+        # If we recently checked and know the status, use cached result
+        if not await self._should_check_tts_health():
+            return self._tts_last_known_status or False
+
+        # Perform actual health check
+        try:
+            tts_online = await self.tts.health_check()
+            self._tts_last_known_status = tts_online
+            self._tts_last_check_time = current_time
+
+            if tts_online:
+                log.debug("[TUI] TTS health check: ONLINE")
+            else:
+                log.debug("[TUI] TTS health check: OFFLINE")
+
+            return tts_online
+
+        except Exception as e:
+            # On error, mark as offline but don't change last_known_status
+            # This allows us to try again on the next check
+            log.debug(f"[TUI] TTS health check error: {e}")
+            self._tts_last_check_time = current_time
+            return False
+
+    def _mark_tts_offline(self):
+        """Mark TTS as offline (called when TTS operations fail)"""
+        self._tts_last_known_status = False
+        self._tts_last_check_time = asyncio.get_event_loop().time()
+        log.debug("[TUI] TTS marked as offline due to failure")
+
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit"),
         Binding("ctrl+m", "select_model", "Model"),
@@ -1279,7 +1335,8 @@ StreamingBubble {
             return False
 
     async def listen_for_messages(self) -> None:
-        """Listen for incoming messages from the server"""
+        """Listen for incoming messages from the server with concurrent processing"""
+        tasks = set()
         try:
             while self.is_connected and self.websocket:
                 # Check if connection is still valid
@@ -1294,12 +1351,24 @@ StreamingBubble {
 
                 try:
                     message = await self.websocket.recv()
-                    await self.handle_server_message(message)
+                    # Process messages concurrently instead of sequentially
+                    task = asyncio.create_task(self.handle_server_message(message))
+                    tasks.add(task)
+                    task.add_done_callback(tasks.discard)
                 except websockets.exceptions.ConnectionClosed:
                     break
+
+                # Clean up completed tasks periodically to prevent memory buildup
+                if len(tasks) > 50:  # Limit concurrent tasks
+                    await asyncio.sleep(0.001)  # Yield control briefly
+                    tasks = {t for t in tasks if not t.done()}
+
         except Exception as e:
             log.error(f"[TUI] Error listening for messages: {e}")
         finally:
+            # Wait for all pending tasks to complete
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
             log.warning("[TUI] WebSocket connection closed")
             self.is_connected = False
 
@@ -1319,9 +1388,9 @@ StreamingBubble {
                 self.add_message(content, "assistant")
                 await streaming_interface.push_assistant_message(content)
                 if not cached:
-                    # Check TTS health in real-time before sending
+                    # Check TTS health with optimized caching
                     try:
-                        tts_online = await self.tts.health_check()
+                        tts_online = await self._check_tts_health_optimized()
                         if tts_online:
                             asyncio.create_task(self.handle_tts(content))
                             log.debug("[TUI] TTS synthesis started")
@@ -1330,6 +1399,7 @@ StreamingBubble {
                     except Exception as e:
                         log.error(f"[TUI] TTS health check failed: {e}")
                         log.debug("[TUI] Skipping TTS due to health check error")
+                        self._mark_tts_offline()
             elif msg_type == "streaming_chunk":
                 # Streaming chunk
                 content = data.get("content", "")
@@ -1391,12 +1461,8 @@ StreamingBubble {
                     except Exception:
                         server_ok = False
 
-                # Check TTS
-                tts_ok = False
-                try:
-                    tts_ok = await self.tts.health_check()
-                except Exception:
-                    pass
+                # Check TTS with optimized logic
+                tts_ok = await self._check_tts_health_optimized()
 
                 # Update status display
                 try:
@@ -1430,6 +1496,7 @@ StreamingBubble {
             await self.tts.play_stream(text)
         except Exception as e:
             log.error(f"[TUI] TTS error: {e}")
+            self._mark_tts_offline()
 
     async def set_server_model(self, model: str) -> None:
         """Set the model on the server"""
