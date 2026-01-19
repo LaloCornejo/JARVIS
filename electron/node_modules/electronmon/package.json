@@ -1,0 +1,67 @@
+{
+  "name": "electronmon",
+  "version": "2.0.4",
+  "description": "watch and reload your electron app the easy way",
+  "main": "src/electronmon.js",
+  "bin": {
+    "electronmon": "./bin/cli.js"
+  },
+  "scripts": {
+    "lint": "eslint bin src",
+    "test": "mocha --timeout 20000 --retries=1",
+    "ciinspect": "xvfb-maybe electron --version",
+    "citest": "xvfb-maybe retry -n 3 -- npm test",
+    "fixture": "cd fixtures && node ../bin/cli.js ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/catdad/electronmon.git"
+  },
+  "author": "Kiril Vatev <vatev.1@gmail.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/catdad/electronmon/issues"
+  },
+  "homepage": "https://github.com/catdad/electronmon#readme",
+  "engines": {
+    "node": ">=10.0.0"
+  },
+  "devDependencies": {
+    "chai": "^4.2.0",
+    "electron": "^23.1.0",
+    "eslint": "^5.16.0",
+    "fs-extra": "^8.1.0",
+    "mocha": "^6.2.2",
+    "node-stream": "^1.7.0",
+    "retry-cli": "0.6.0",
+    "symlink-dir": "^3.1.1",
+    "unstyle": "^0.1.0",
+    "xvfb-maybe": "^0.2.1"
+  },
+  "dependencies": {
+    "chalk": "^3.0.0",
+    "import-from": "^3.0.0",
+    "runtime-required": "^1.1.0",
+    "watchboy": "^0.4.3"
+  },
+  "keywords": [
+    "electron",
+    "reload",
+    "reloader",
+    "livereload",
+    "auto-reload",
+    "live-reload",
+    "refresh",
+    "restart",
+    "watch",
+    "watcher",
+    "watching",
+    "monitor",
+    "hot",
+    "files",
+    "fs",
+    "dev",
+    "development",
+    "node"
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "patterns": ["**/*.js", "**/*.html", "**/*.json"],
+  "ignore": ["node_modules/**"]
+}

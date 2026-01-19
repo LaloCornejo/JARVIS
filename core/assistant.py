@@ -52,12 +52,15 @@ class VoiceAssistant:
         tools: ToolRegistry | None = None,
         copilot_client: CopilotClient | None = None,
         gemini_client: GeminiClient | None = None,
+        websocket=None,
+        on_send_websocket=None,
     ):
         log.info("VoiceAssistant __init__ starting")
         config_path = config_path or "config/settings.yaml"
         self.config = Config(config_path)
         self.debug = debug
         self.tools = tools
+        self.websocket = websocket
 
         data_dir = Path("data")
         data_dir.mkdir(exist_ok=True)
@@ -231,6 +234,17 @@ class VoiceAssistant:
 
     async def generate_response(self, text: str) -> str | None:
         log.info("generate_response called with: %s", text)
+
+        if self.websocket:
+            # Send to WebSocket server for processing
+            import json
+
+            log.info(f"Sending to WebSocket: {text[:100]}...")
+            await self.websocket.send(json.dumps({"type": "user_message", "content": text}))
+            if self.on_send_websocket:
+                self.on_send_websocket(text)
+            return None  # Response will come through WebSocket
+
         await self._conversation_buffer.add_message({"role": "user", "content": text})
 
         # Automatically recall relevant memories

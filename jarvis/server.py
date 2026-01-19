@@ -49,7 +49,7 @@ class JarvisServer:
             else:
                 return model_selection
 
-    async def process_message(self, user_input: str, websocket=None) -> None:
+    async def process_message(self, user_input: str, broadcast_func=None) -> None:
         """Process a user message and handle LLM interaction, tools, and responses"""
         log.warning(f"[SERVER] Processing message: {len(user_input)} chars")
 
@@ -57,9 +57,9 @@ class JarvisServer:
         self.messages.append({"role": "user", "content": user_input})
         await conversation_buffer.add_message({"role": "user", "content": user_input})
 
-        # Send user message to client
-        if websocket:
-            await websocket.send_json({"type": "user_message", "content": user_input})
+        # Send user message to all clients
+        if broadcast_func:
+            await broadcast_func({"type": "user_message", "content": user_input})
 
         # Resolve the model to use
         resolved_model = self._resolve_model()
@@ -77,8 +77,8 @@ class JarvisServer:
             self.messages.append({"role": "assistant", "content": cached_response})
             await streaming_interface.push_assistant_message(cached_response)
             await conversation_buffer.add_message({"role": "assistant", "content": cached_response})
-            if websocket:
-                await websocket.send_json(
+            if broadcast_func:
+                await broadcast_func(
                     {"type": "assistant_message", "content": cached_response, "cached": True}
                 )
             return
@@ -99,8 +99,8 @@ class JarvisServer:
                 if content := msg.get("content"):
                     log.warning(f"[SERVER] Got content chunk {chunk_count}: {len(content)} chars")
                     full_response += content
-                    if websocket:
-                        await websocket.send_json({"type": "streaming_chunk", "content": content})
+                    if broadcast_func:
+                        await broadcast_func({"type": "streaming_chunk", "content": content})
                 if calls := msg.get("tool_calls"):
                     for call in calls:
                         if call.get("id") not in [tc.get("id") for tc in tool_calls]:
@@ -145,8 +145,8 @@ class JarvisServer:
                     log.warning(
                         f"[SERVER] Using vision response directly: {len(full_response)} chars"
                     )
-                    if websocket:
-                        await websocket.send_json(
+                    if broadcast_func:
+                        await broadcast_func(
                             {"type": "streaming_chunk", "content": full_response, "replace": True}
                         )
                 except Exception as e:
@@ -166,8 +166,8 @@ class JarvisServer:
                                 f"{len(content)} chars"
                             )
                             full_response += content
-                            if websocket:
-                                await websocket.send_json(
+                            if broadcast_func:
+                                await broadcast_func(
                                     {"type": "streaming_chunk", "content": content}
                                 )
 
@@ -175,11 +175,8 @@ class JarvisServer:
         await streaming_interface.push_assistant_message(full_response)
         await conversation_buffer.add_message({"role": "assistant", "content": full_response})
 
-        if websocket:
-            await websocket.send_json({"type": "message_complete", "full_response": full_response})
-
-        # Send completion message first to finish streaming immediately
-        await websocket.send_json({"type": "message_complete", "full_response": full_response})
+        if broadcast_func:
+            await broadcast_func({"type": "message_complete", "full_response": full_response})
 
         # Cache response if appropriate
         if should_cache_response(user_input, full_response):

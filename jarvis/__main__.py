@@ -1645,6 +1645,8 @@ StreamingBubble {
             self.voice_assistant = VoiceAssistant(
                 debug=self._debug_mode,
                 tools=self.tools,
+                websocket=self.websocket,
+                on_send_websocket=self._create_streaming_bubble,
             )
 
             def on_state_change(state: AssistantState) -> None:
@@ -1721,6 +1723,14 @@ StreamingBubble {
             core.set_status("SPEAKING")
         else:
             core.set_status("ONLINE")
+
+    def _create_streaming_bubble(self, text: str) -> None:
+        """Create a streaming bubble for the assistant response."""
+        from .components import Bubble  # Assuming Bubble is imported
+
+        self._streaming_bubble = Bubble("", role="assistant")
+        chat = self.query_one("#chat-scroll", VerticalScroll)
+        chat.mount(self._streaming_bubble)
 
     def on_voice_transcription(self, event: VoiceTranscription) -> None:
         """Handle voice transcription events."""

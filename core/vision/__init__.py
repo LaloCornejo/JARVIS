@@ -107,16 +107,16 @@ class VisionProcessor:
         prompt = (
             custom_prompt
             or """
-        Analyze this image comprehensively and provide:
-        1. A detailed description of what's visible
-        2. Any text or writing present (OCR)
-        3. Objects, people, or notable elements
-        4. The overall scene or context
-        5. Any actions or activities happening
-        6. Colors, lighting, and composition
-        7. Potential emotions or mood conveyed
+        Describe this image in no more than 150 words, focusing on the main object or the specific element of interest. Be concise and direct in your analysis.
 
-        Structure your response as a JSON object with keys: description, text_content, objects, scene_context, activities, visual_elements, mood
+        Include key details about:
+        - Main subject/object
+        - Key characteristics
+        - Context or setting
+        - Any text present
+        - Notable features
+
+        Keep the total response under 150 words.
         """
         )
 
@@ -149,14 +149,9 @@ class VisionProcessor:
     async def _object_detection(self, image_data: str) -> Dict[str, Any]:
         """Detect and classify objects in the image"""
         prompt = """
-        Identify all objects, people, animals, and notable elements in this image.
-        For each item, provide:
-        - Name/type of object
-        - Approximate location (top-left, center, bottom-right, etc.)
-        - Confidence level (high/medium/low)
-        - Any notable characteristics
-
-        Return as JSON with an "objects" array containing objects with keys: name, location, confidence, characteristics
+        Identify the main objects in this image in no more than 150 words.
+        Focus on the primary subject(s) and their key characteristics.
+        List major items with brief descriptions, keeping total response concise.
         """
 
         try:
@@ -186,21 +181,9 @@ class VisionProcessor:
     async def _text_recognition(self, image_data: str) -> Dict[str, Any]:
         """Extract text from images using OCR capabilities"""
         prompt = """
-        Extract all readable text from this image. Include:
-        1. Main body text
-        2. Headers and titles
-        3. Captions and labels
-        4. Any handwritten text
-        5. UI elements or buttons with text
-        6. Signs, logos, or branded text
-
-        For each text element, note:
-        - The actual text content
-        - Approximate location in the image
-        - Text style (printed, handwritten, stylized, etc.)
-        - Language if detectable
-
-        Return as JSON with a "text_elements" array containing objects with keys: text, location, style, language
+        Extract the main readable text from this image in no more than 150 words.
+        Focus on the most important text content, including headers, labels, or key messages.
+        Summarize the text found, keeping the response concise.
         """
 
         try:
@@ -232,21 +215,9 @@ class VisionProcessor:
     async def _facial_analysis(self, image_data: str) -> Dict[str, Any]:
         """Analyze faces in the image"""
         prompt = """
-        Analyze any faces visible in this image. For each person, provide:
-        1. Estimated age range
-        2. Gender (if detectable)
-        3. Ethnicity/cultural background (if apparent)
-        4. Facial expression and emotion
-        5. Notable facial features
-        6. Head pose/direction of gaze
-        7. Any accessories (glasses, hats, etc.)
-
-        Also note:
-        - Number of people visible
-        - Group dynamics or interactions
-        - Overall mood or atmosphere
-
-        Return as JSON with a "faces" array and "summary" object
+        Describe the people or faces in this image in no more than 150 words.
+        Focus on the main individuals, their expressions, and key characteristics.
+        Be concise in your summary.
         """
 
         try:
@@ -276,10 +247,8 @@ class VisionProcessor:
         prompt = (
             custom_prompt
             or """
-        Provide a detailed, natural language description of this image.
-        Describe what's happening, who or what is present, the setting,
-        colors, lighting, mood, and any other notable aspects.
-        Write as if you're describing the image to someone who cannot see it.
+        Describe this image concisely in no more than 150 words, focusing on the main subject or requested element.
+        Include key details about what's visible, the setting, and notable features.
         """
         )
 
@@ -306,18 +275,9 @@ class VisionProcessor:
     ) -> Dict[str, Any]:
         """Specialized analysis for screenshots with UI/UX context"""
         prompt = f"""
-        This is a screenshot of a computer screen or application. Analyze it with focus on:
-        1. Application/software visible (name, type, interface)
-        2. UI elements (buttons, menus, windows, dialogs)
-        3. Text content and labels
-        4. Visual layout and design
-        5. Any errors or status messages
-        6. User interface state and interactions
-
+        Describe this screenshot concisely in no more than 150 words, focusing on the main application, UI elements, and key content visible.
+        Include what the user might want to do next.
         {f"Additional context: {context}" if context else ""}
-
-        Provide actionable insights about what the user might want to do with this screen.
-        Structure as JSON with keys: application, ui_elements, text_content, layout, status, insights
         """
 
         try:
