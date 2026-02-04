@@ -3,7 +3,7 @@
 import json
 import logging
 import sys
-from typing import Set
+from typing import Dict, Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -96,6 +96,33 @@ jarvis_server = JarvisServer()
 connected_clients: Set[WebSocket] = set()
 
 
+async def broadcast(message: dict):
+    """Broadcast a message to all connected clients"""
+    print(f"Broadcasting {message.get('type', 'unknown')} to {len(connected_clients)} clients")
+    log.warning(
+        f"[WEBSOCKET] Broadcasting {message.get('type', 'unknown')} to {len(connected_clients)} clients"
+    )
+    for client in connected_clients.copy():  # Copy to avoid modification during iteration
+        try:
+            await client.send_json(message)
+        except Exception as e:
+            log.error(f"[WEBSOCKET] Failed to send to client: {e}")
+            connected_clients.discard(client)
+
+
+async def broadcast_to_ip(message: dict, ip: str):
+    """Broadcast a message to all clients with the same IP"""
+    if ip in connected_clients:
+        for client in connected_clients[ip].copy():  # Copy to avoid modification during iteration
+            try:
+                await client.send_json(message)
+            except Exception as e:
+                log.error(f"[WEBSOCKET] Failed to send to client {client}: {e}")
+                connected_clients[ip].discard(client)
+                if not connected_clients[ip]:
+                    del connected_clients[ip]
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """Handle WebSocket connections from TUI clients"""
@@ -112,7 +139,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 if message_type == "user_message":
                     user_input = message.get("content", "")
-                    await jarvis_server.process_message(user_input, websocket)
+                    await jarvis_server.process_message(user_input, broadcast)
                 elif message_type == "set_model":
                     model = message.get("model")
                     jarvis_server.set_model(model)

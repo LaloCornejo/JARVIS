@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Invisible JARVIS with Live2D</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background-color: rgba(0, 0, 0, 0.1);
+        /* Semi-transparent black */
+        width: 100vw;
+        height: 100vh;
+      }
+
+      /* Make the window translucent */
+      html {
+        background-color: rgba(0, 0, 0, 0.1);
+      }
+
+      /* Live2D canvas container */
+      #live2d-canvas {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      /* Show basic content overlay */
+      .overlay {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        font-family: Arial, sans-serif;
+        padding: 10px 15px;
+        border-radius: 5px;
+        font-size: 14px;
+        z-index: 1000;
+      }
+
+      /* Response box */
+      #response-box {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        font-family: Arial, sans-serif;
+        padding: 10px 15px;
+        border-radius: 10px;
+        font-size: 12px;
+        max-width: 80%;
+        max-height: 200px;
+        overflow-y: auto;
+        word-wrap: break-word;
+        z-index: 1000;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      /* Markdown styles */
+      #response-box p {
+        margin: 0 0 10px 0;
+      }
+
+      #response-box strong,
+      #response-box b {
+        font-weight: bold;
+      }
+
+      #response-box em,
+      #response-box i {
+        font-style: italic;
+      }
+
+      #response-box code {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 2px 4px;
+        border-radius: 3px;
+        font-family: monospace;
+      }
+
+      #response-box pre {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 10px;
+        border-radius: 5px;
+        overflow-x: auto;
+      }
+
+      #response-box ul,
+      #response-box ol {
+        margin: 10px 0;
+        padding-left: 20px;
+      }
+
+      #response-box li {
+        margin: 5px 0;
+      }
+
+      #response-box.visible {
+        opacity: 1;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Live2D canvas -->
+    <canvas id="live2d-canvas"></canvas>
+
+    <!-- Overlay content -->
+    <div class="overlay" stytle="opaciy: 0.5">JARVIS</div>
+
+    <!-- Response box -->
+    <div id="response-box">Connecting to JARVIS...</div>
+
+    <!-- Load PixiJS first -->
+    <script src="./node_modules/pixi.js/dist/browser/pixi.min.js"></script>
+    <!-- Load Cubism cores -->
+    <script src="https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js"></script>
+    <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
+    <!-- Load Live2D library -->
+    <script src="./node_modules/pixi-live2d-display/dist/index.js"></script>
+    <!-- Load Markdown parser -->
+    <script src="./marked.min.js"></script>
+    <!-- Debug library loading -->
+    <script>
+      console.log("[DEBUG] PIXI loaded:", typeof PIXI);
+      console.log("[DEBUG] PIXI.live2d loaded:", typeof PIXI.live2d);
+      console.log("[DEBUG] LIVE2D loaded:", typeof LIVE2D);
+      console.log("[DEBUG] Live2DCubismCore loaded:", typeof Live2DCubismCore);
+      if (PIXI.live2d) {
+        console.log("[DEBUG] PIXI.live2d contents:", Object.keys(PIXI.live2d));
+        console.log(
+          "[DEBUG] PIXI.live2d.Live2DModel loaded:",
+          typeof PIXI.live2d.Live2DModel,
+        );
+        console.log(
+          "[DEBUG] PIXI.live2d.Live2DModel.from loaded:",
+          typeof PIXI.live2d.Live2DModel?.from,
+        );
+      } else {
+        console.error("[DEBUG] PIXI.live2d is not available!");
+      }
+    </script>
+    <!-- Main renderer script -->
+    <script src="renderer.js"></script>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+@echo off
+echo Starting JARVIS Electron UI...
+cd electron
+start /B bun run start
+cd ..
+echo Waiting for server to start...
+timeout /t 5 /nobreak > nul
+echo Starting JARVIS TUI in new window...
+start "JARVIS TUI" uv run python -m jarvis -d
