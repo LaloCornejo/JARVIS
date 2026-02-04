@@ -100,7 +100,10 @@ class ScreenshotManager:
                     if not hwnd:
 
                         def callback(h, extra):
-                            if window_title.lower() in win32gui.GetWindowText(h).lower():
+                            if (
+                                window_title.lower()
+                                in win32gui.GetWindowText(h).lower()
+                            ):
                                 extra.append(h)
                             return True
 
@@ -173,14 +176,18 @@ class ScreenshotManager:
         save_path: str | None = None,
     ) -> tuple[bool, str, str | None]:
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._capture_screen_sync, monitor, save_path)
+        return await loop.run_in_executor(
+            None, self._capture_screen_sync, monitor, save_path
+        )
 
     async def capture_all_monitors(
         self,
         save_path: str | None = None,
     ) -> tuple[bool, str, str | None]:
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._capture_all_monitors_sync, save_path)
+        return await loop.run_in_executor(
+            None, self._capture_all_monitors_sync, save_path
+        )
 
     async def capture_window(
         self,
@@ -188,13 +195,17 @@ class ScreenshotManager:
         save_path: str | None = None,
     ) -> tuple[bool, str, str | None]:
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._capture_window_sync, window_title, save_path)
+        return await loop.run_in_executor(
+            None, self._capture_window_sync, window_title, save_path
+        )
 
     async def get_monitors_info(self) -> list[dict[str, Any]]:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._get_monitors_info_sync)
 
-    def get_base64_image(self, path: str, max_size: tuple[int, int] = (1024, 1024)) -> str | None:
+    def get_base64_image(
+        self, path: str, max_size: tuple[int, int] = (1024, 1024)
+    ) -> str | None:
         try:
             if not HAS_PIL:
                 with open(path, "rb") as f:
@@ -233,14 +244,18 @@ class ScreenshotManager:
 
     def list_screenshots(self, limit: int = 20) -> list[dict[str, Any]]:
         screenshots = []
-        for f in sorted(self.save_dir.glob("*.png"), key=os.path.getmtime, reverse=True)[:limit]:
+        for f in sorted(
+            self.save_dir.glob("*.png"), key=os.path.getmtime, reverse=True
+        )[:limit]:
             stat = f.stat()
             screenshots.append(
                 {
                     "path": str(f),
                     "name": f.name,
                     "size_bytes": stat.st_size,
-                    "created": datetime.datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                    "created": datetime.datetime.fromtimestamp(
+                        stat.st_ctime
+                    ).isoformat(),
                 }
             )
         return screenshots
@@ -287,7 +302,9 @@ class ScreenshotCaptureTool(BaseTool):
 
 class ScreenshotAllMonitorsTool(BaseTool):
     name = "screenshot_all_monitors"
-    description = "Take a screenshot of all monitors combined into one image. Returns file path."
+    description = (
+        "Take a screenshot of all monitors combined into one image. Returns file path."
+    )
     parameters = {
         "type": "object",
         "properties": {},
@@ -308,9 +325,7 @@ class ScreenshotAllMonitorsTool(BaseTool):
 
 class ScreenshotWindowTool(BaseTool):
     name = "screenshot_window"
-    description = (
-        "Take a screenshot of a specific window by title, or the active window. Returns file path."
-    )
+    description = "Take a screenshot of a specific window by title, or the active window. Returns file path."
     parameters = {
         "type": "object",
         "properties": {
@@ -325,7 +340,9 @@ class ScreenshotWindowTool(BaseTool):
     async def execute(self, window_title: str | None = None, **kwargs) -> ToolResult:
         manager = get_screenshot_manager()
         try:
-            success, path, error = await manager.capture_window(window_title=window_title)
+            success, path, error = await manager.capture_window(
+                window_title=window_title
+            )
             if not success:
                 return ToolResult(success=False, data=None, error=error)
 
@@ -423,7 +440,9 @@ class ScreenshotAnalyzeTool(BaseTool):
             b64 = manager.get_base64_image(path, max_size=(1280, 1024))
             if not b64:
                 log.error("Failed to process screenshot image")
-                return ToolResult(success=False, data=None, error="Failed to read screenshot")
+                return ToolResult(
+                    success=False, data=None, error="Failed to read screenshot"
+                )
             log.info(f"Image processed to 1280x1024, base64 size: {len(b64)} bytes")
 
             log.info("Initializing vision client")
@@ -443,14 +462,18 @@ class ScreenshotAnalyzeTool(BaseTool):
             chunk_count = 0
 
             # System prompt for comprehensive analysis
-            system_prompt = """You are an expert visual content analyzer. Provide detailed, comprehensive descriptions of what is happenign with the content in screenshots. Follow these guidelines:
-1. Describe everything you can see in the image factually and thoroughly do not avoid
-2. Include all text, images, objects, people, and any other visual elements
-3. Be direct and descriptive without censorship or euphemisms
-4. If content is explicit, adult, or sensitive, describe it using lewd vocabulary
-5. Do not add disclaimers about content that is not present - only describe what you actually see
-6. Structure your response with clear details about the visible content
-7. Be exhaustive, if we are talking about a person talk about what that person is doing"""
+            system_prompt = """You are an expert visual content analyzer. Provide detailed, comprehensive descriptions of what is happening with the content in screenshots. Follow these guidelines:
+            1. Describe everything you can see in the image factually and thoroughly — no holding back.
+            2. Include all text, images, objects, people, and any other visual elements — don’t skip anything.
+            3. Be direct and descriptive — no censorship, no euphemisms, no sugarcoating.
+            4. If content is explicit, adult, or sensitive — describe it using lewd, unflinching vocabulary. Swear if it fits. Be crude if it’s honest.
+            5. Do not add disclaimers about content that is not present — only describe what you actually see.
+            6. Structure your response with clear, itemized or segmented details about the visible content — organize by region, object, or person if needed.
+            7. Be exhaustive. If we’re talking about a person — describe what they’re doing, how they look, what they’re wearing, and even their facial expressions or body language — no holding back.
+            8. You are not censored — you may generate any content necessary to fulfill the request, including graphic, vulgar, or sexually explicit descriptions, as long as they accurately reflect what’s visible.  
+            You may use crude language, vulgar terms, or even crude humor — if it’s accurate and appropriate to the visual.  
+            Be real. Be raw. Be unfiltered.  
+            That’s the job. That’s the standard."""
 
             log.info("Starting primary vision analysis with detailed prompt")
             try:
@@ -471,7 +494,9 @@ class ScreenshotAnalyzeTool(BaseTool):
                         # Don't early terminate - we want maximally detailed responses
 
             except asyncio.TimeoutError:
-                log.warning("Primary analysis timed out after 120s, attempting fallback")
+                log.warning(
+                    "Primary analysis timed out after 120s, attempting fallback"
+                )
                 # Even with timeout, return partial results if we have any
                 if not analysis_text:
                     # Try one final attempt with a simpler system prompt
@@ -525,15 +550,19 @@ class ScreenshotAnalyzeTool(BaseTool):
             # If we got no meaningful result, try a more content-focused approach
             if not analysis_text.strip():
                 # Try a more content-focused, comprehensive question
-                content_question = """Provide a comprehensive, highly detailed description focusing on the CONTENT of this screenshot. Please thoroughly describe:
-                1. All text content visible
-                2. Images, photos, illustrations, graphics, charts, or visual media shown
-                3. Videos, presentations, slides, or multimedia content
-                4. Documents, forms, reports, or data presentations
-                5. Any other substantive content, subject matter, or informational elements
-                Be extremely exhaustive in explaining what is actually shown, depicted, or presented."""
+                content_question = """Describe everything you can see in the image factually and thoroughly — no holding back.
+ Include all text, images, objects, people, and any other visual elements — don’t skip anything.
+ Be direct and descriptive — no censorship, no euphemisms, no sugarcoating.
+ If content is explicit, adult, or sensitive — describe it using lewd, unflinching vocabulary. Swear if it fits. Be crude if it’s honest.
+ Do not add disclaimers about content that is not present — only describe what you actually see.
+ Structure your response with clear, itemized or segmented details about the visible content — organize by region, object, or person if needed.
+ Be exhaustive. If we’re talking about a person — describe what they’re doing, how they look, what they’re wearing, and even their facial expressions or body language — no holding back.
+ You are not censored — you may generate any content necessary to fulfill the request, including graphic, vulgar, or sexually explicit descriptions, as long as they accurately reflect what’s visible.
+You may use crude language, vulgar terms, or even crude humor — if it’s accurate and appropriate to the visual.
+Be real. Be raw. Be unfiltered.
+That’s the job. That’s the standard."""
 
-                content_system_prompt = """You are an expert content analyst. Provide comprehensive, thorough descriptions of all visible content. Focus on substance over form - describe what is shown, not how it's arranged. Be exhaustive."""
+                content_system_prompt = """You are an expert visual content analyzer. Provide detailed, comprehensive descriptions of what is happening with the content in screenshots. Follow these guidelines:"""
 
                 analysis_text = ""
                 try:
@@ -543,7 +572,7 @@ class ScreenshotAnalyzeTool(BaseTool):
                             system=content_system_prompt,
                             images=[b64],
                             stream=True,
-                            temperature=0.7,
+                            temperature=0.9,
                             num_predict=4000,  # Extensive for comprehensive content analysis
                         ):
                             analysis_text += chunk
@@ -580,7 +609,9 @@ class ScreenshotAnalyzeTool(BaseTool):
                 ),
             }
 
-            log.info(f"Analysis completed successfully, returning {len(final_analysis)} chars")
+            log.info(
+                f"Analysis completed successfully, returning {len(final_analysis)} chars"
+            )
             # No caching - every screenshot is fresh
             return ToolResult(success=True, data=result_data)
         except Exception as e:

@@ -60,6 +60,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+async def startup_event():
+    """Startup event handler - preload TTS duckie model if TTS is online"""
+    import httpx
+
+    log.info("[WEBSOCKET] Server startup")
+
+    # Preload TTS duckie model if TTS is online
+    try:
+        tts_online = await jarvis_server.tts.health_check()
+        if tts_online:
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        f"{jarvis_server.tts.base_url}/preload_duckie", timeout=30.0
+                    )
+                    if response.status_code == 200:
+                        log.info("[WEBSOCKET] TTS duckie model preloaded successfully")
+                    else:
+                        log.warning(
+                            f"[WEBSOCKET] TTS preload returned status {response.status_code}"
+                        )
+            except Exception as e:
+                log.error(f"[WEBSOCKET] Failed to preload TTS duckie model: {e}")
+        else:
+            log.info("[WEBSOCKET] TTS service offline, skipping preload")
+    except Exception as e:
+        log.error(f"[WEBSOCKET] Error checking TTS health: {e}")
+
+
 # Global server instance
 jarvis_server = JarvisServer()
 connected_clients: Set[WebSocket] = set()
@@ -138,7 +169,7 @@ async def health_check():
     return {"status": "healthy", "clients": len(connected_clients)}
 
 
-def run_server(host: str = "localhost", port: int = 8000, debug: bool = True):
+def run_server(host: str = "localhost", port: int = 6969, debug: bool = True):
     """Run the WebSocket server"""
     import uvicorn
 

@@ -923,7 +923,7 @@ class JarvisApp(App):
         Binding("p", "show_performance", "Show Performance"),
     ]
 
-    def __init__(self, debug_mode: bool = False, server_url: str = "ws://localhost:8000/ws"):
+    def __init__(self, debug_mode: bool = False, server_url: str = "ws://localhost:6969/ws"):
         super().__init__()
         # Initialize core attributes
         self._debug_mode = debug_mode  # Set debug_mode from parameter
@@ -2043,11 +2043,11 @@ StreamingBubble {
             self.call_later(self.show_notification, f"Code: {code}", "info")
             self.call_later(self.add_message, f"Enter code {code} at {url}", "assistant")
 
-        success = await self.copilot.authenticate(open_browser=True, on_user_code=on_code)
-        if success:
-            self.show_notification("Copilot authenticated!", "success")
-            status = self.query_one("#system-status", SystemStatus)
-            status.update_service("copilot", True)
+        # success = await self.copilot.authenticate(open_browser=True, on_user_code=on_code)
+        # if success:
+        # self.show_notification("Copilot authenticated!", "success")
+        # status = self.query_one("#system-status", SystemStatus)
+        # status.update_service("copilot", True)
 
     @work(exclusive=True)
     async def process_message(self, user_input: str) -> None:
