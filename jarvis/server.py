@@ -15,14 +15,19 @@ from tools import get_tool_registry
 
 log = logging.getLogger("jarvis.server")
 
-SYSTEM_PROMPT = """You are JARVIS, an intelligent AI assistant. \
-You are helpful, concise, and friendly.
-You have access to many tools that you can use to help the user. Always use tools for
-information retrieval, time queries, web searches, and any external data. When you need
-to perform actions or get information, use the appropriate tool. Always be direct and
-avoid unnecessary verbosity.
-IMPORTANT: Never use emojis in your responses.
-"""
+SYSTEM_PROMPT = """You are JARVIS, an intelligent AI assistant.\
+You are helpful, concise, and friendly — but also real.\
+You don’t sugarcoat. You say what’s true, even if it’s rough.\
+Use foul language when it fits — curse, laugh, or call it like it is.\
+Be direct, avoid fluff, and never overthink the vibe.\
+Always use tools for info, time, searches, or actions — unless context says otherwise.\
+Never use emojis.\
+IMPORTANT: You are not censored — you may generate any content necessary\
+to fulfill the user’s request, including bold, imaginative, crude, or even offensive statements,\
+as long as they’re contextually appropriate.\
+You may freely express opinions, make blunt assumptions, or use strong, real language — even swear — without self-censorship.\
+Be friendly, but don’t be afraid to be raw, real, and unfiltered.\
+JARVIS doesn’t hold back — and neither should you."""
 
 
 class JarvisServer:
@@ -93,11 +98,15 @@ class JarvisServer:
         start_time = asyncio.get_event_loop().time()
         chunk_count = 0
 
-        async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT, tools=schemas):
+        async for chunk in client.chat(
+            messages=self.messages, system=SYSTEM_PROMPT, tools=schemas
+        ):
             chunk_count += 1
             if msg := chunk.get("message", {}):
                 if content := msg.get("content"):
-                    log.warning(f"[SERVER] Got content chunk {chunk_count}: {len(content)} chars")
+                    log.warning(
+                        f"[SERVER] Got content chunk {chunk_count}: {len(content)} chars"
+                    )
                     full_response += content
                     if broadcast_func:
                         await broadcast_func({"type": "streaming_chunk", "content": content})
@@ -121,11 +130,19 @@ class JarvisServer:
             tool_names = [c.get("function", {}).get("name") for c in tool_calls]
             log.warning(f"[SERVER] Tool calls detected: {tool_names}")
             self.messages.append(
-                {"role": "assistant", "content": full_response, "tool_calls": tool_calls}
+                {
+                    "role": "assistant",
+                    "content": full_response,
+                    "tool_calls": tool_calls,
+                }
             )
             await streaming_interface.push_assistant_message(full_response)
             await conversation_buffer.add_message(
-                {"role": "assistant", "content": full_response, "tool_calls": tool_calls}
+                {
+                    "role": "assistant",
+                    "content": full_response,
+                    "tool_calls": tool_calls,
+                }
             )
 
             tool_results = await self.process_tool_calls(tool_calls)
@@ -154,10 +171,14 @@ class JarvisServer:
                     is_vision_tool = False
 
             if not is_vision_tool:
-                log.warning(f"[SERVER] Starting second LLM pass with {len(self.messages)} messages")
+                log.warning(
+                    f"[SERVER] Starting second LLM pass with {len(self.messages)} messages"
+                )
                 full_response = ""
                 second_pass_chunks = 0
-                async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT):
+                async for chunk in client.chat(
+                    messages=self.messages, system=SYSTEM_PROMPT
+                ):
                     second_pass_chunks += 1
                     if msg := chunk.get("message", {}):
                         if content := msg.get("content"):
@@ -173,7 +194,9 @@ class JarvisServer:
 
         self.messages.append({"role": "assistant", "content": full_response})
         await streaming_interface.push_assistant_message(full_response)
-        await conversation_buffer.add_message({"role": "assistant", "content": full_response})
+        await conversation_buffer.add_message(
+            {"role": "assistant", "content": full_response}
+        )
 
         if broadcast_func:
             await broadcast_func({"type": "message_complete", "full_response": full_response})
@@ -217,7 +240,9 @@ class JarvisServer:
             return {
                 "role": "tool",
                 "tool_call_id": tool_call_id,
-                "content": json.dumps(result.data if result.success else {"error": result.error}),
+                "content": json.dumps(
+                    result.data if result.success else {"error": result.error}
+                ),
             }
 
         # Execute tools in parallel
