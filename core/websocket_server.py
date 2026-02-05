@@ -5,12 +5,18 @@ import logging
 import sys
 from typing import Dict, Set
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from rich.console import Console
 from rich.logging import RichHandler
 
 from jarvis.server import JarvisServer
+from core.telegram_bot import telegram_bot_handler
 
 log = logging.getLogger("jarvis.websocket")
 
@@ -59,37 +65,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Startup event handler - preload TTS duckie model if TTS is online"""
-    import httpx
-
-    log.info("[WEBSOCKET] Server startup")
-
-    # Preload TTS duckie model if TTS is online
-    try:
-        tts_online = await jarvis_server.tts.health_check()
-        if tts_online:
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        f"{jarvis_server.tts.base_url}/preload_duckie", timeout=30.0
-                    )
-                    if response.status_code == 200:
-                        log.info("[WEBSOCKET] TTS duckie model preloaded successfully")
-                    else:
-                        log.warning(
-                            f"[WEBSOCKET] TTS preload returned status {response.status_code}"
-                        )
-            except Exception as e:
-                log.error(f"[WEBSOCKET] Failed to preload TTS duckie model: {e}")
-        else:
-            log.info("[WEBSOCKET] TTS service offline, skipping preload")
-    except Exception as e:
-        log.error(f"[WEBSOCKET] Error checking TTS health: {e}")
-
 
 # Global server instance
 jarvis_server = JarvisServer()
@@ -166,10 +141,66 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "clients": len(connected_clients)}
+    telegram_status = "running" if telegram_bot_handler.is_running() else "stopped"
+    return {
+        "status": "healthy",
+        "clients": len(connected_clients),
+        "telegram_bot": telegram_status,
+    }
 
 
-def run_server(host: str = "localhost", port: int = 6969, debug: bool = True):
+@app.get("/telegram/status")
+async def telegram_status():
+    """Get Telegram bot status"""
+    return telegram_bot_handler.get_stats()
+
+
+@app.post("/telegram/start")
+async def telegram_start():
+    """Start Telegram bot"""
+    success = await telegram_bot_handler.start(jarvis_server)
+    return {"started": success, "running": telegram_bot_handler.is_running()}
+
+
+@app.post("/telegram/stop")
+async def telegram_stop():
+    """Stop Telegram bot"""
+    await telegram_bot_handler.stop()
+    return {"running": telegram_bot_handler.is_running()}
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start Telegram bot on server startup."""
+    log.info("[SERVER] Starting up...")
+    # Telegram bot will be started here if TELEGRAM_BOT_TOKEN is set
+    import os
+
+    if os.environ.get("TELEGRAM_BOT_TOKEN"):
+        try:
+            success = await telegram_bot_handler.start(jarvis_server)
+            if success:
+                log.info("[TELEGRAM] Bot started automatically with server")
+            else:
+                log.warning("[TELEGRAM] Bot failed to start (check TELEGRAM_BOT_TOKEN)")
+        except Exception as e:
+            log.error(f"[TELEGRAM] Error starting bot: {e}")
+    else:
+        log.info("[TELEGRAM] Bot not started (TELEGRAM_BOT_TOKEN not set)")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop Telegram bot on server shutdown."""
+    log.info("[SERVER] Shutting down...")
+    if telegram_bot_handler.is_running():
+        await telegram_bot_handler.stop()
+        log.info("[TELEGRAM] Bot stopped")
+
+
+def run_server(
+    host: str = "localhost", port: int = 8000, debug: bool = True, enable_telegram: bool = True
+):
     """Run the WebSocket server"""
     import uvicorn
 

@@ -110,3 +110,29 @@ class Config:
         if primary.startswith("copilot/"):
             return primary.split("/", 1)[1]
         return "claude-sonnet-4.5"
+
+    @property
+    def telegram_bot_token(self) -> str | None:
+        import os
+
+        return os.environ.get("TELEGRAM_BOT_TOKEN") or self.get("telegram.bot_token")
+
+    @property
+    def telegram_allowed_chat_ids(self) -> list[int | str] | None:
+        """Get list of allowed Telegram chat IDs for security.
+
+        Returns None if all chats are allowed (no whitelist).
+        Configure in settings.yaml or TELEGRAM_ALLOWED_CHAT_IDS env var.
+        """
+        import os
+
+        env_ids = os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "")
+        if env_ids:
+            # Parse comma-separated IDs
+            return [id.strip() for id in env_ids.split(",") if id.strip()]
+
+        config_ids = self.get("telegram.allowed_chat_ids", [])
+        if config_ids:
+            return config_ids
+
+        return None  # No whitelist = allow all

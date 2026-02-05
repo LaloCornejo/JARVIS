@@ -82,6 +82,17 @@ from tools.integrations.spotify import (
     SpotifySearchTool,
     SpotifyVolumeTool,
 )
+from tools.integrations.telegram import (
+    TelegramDeleteMessageTool,
+    TelegramEditMessageTool,
+    TelegramGetBotInfoTool,
+    TelegramGetChatInfoTool,
+    TelegramPinMessageTool,
+    TelegramReceiveMessagesTool,
+    TelegramSendDocumentTool,
+    TelegramSendMessageTool,
+    TelegramSendPhotoTool,
+)
 from tools.integrations.vlc import (
     VLCNextTool,
     VLCPauseTool,
@@ -133,6 +144,15 @@ __all__ = [
     "DiscordListChannelsTool",
     "DiscordListServersTool",
     "DiscordSendDMTool",
+    "TelegramSendMessageTool",
+    "TelegramReceiveMessagesTool",
+    "TelegramGetChatInfoTool",
+    "TelegramGetBotInfoTool",
+    "TelegramSendPhotoTool",
+    "TelegramSendDocumentTool",
+    "TelegramEditMessageTool",
+    "TelegramDeleteMessageTool",
+    "TelegramPinMessageTool",
     "GitHubListReposTool",
     "GitHubListIssuesTool",
     "GitHubCreateIssueTool",
