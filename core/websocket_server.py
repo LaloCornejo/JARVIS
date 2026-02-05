@@ -5,12 +5,18 @@ import logging
 import sys
 from typing import Dict, Set
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from rich.console import Console
 from rich.logging import RichHandler
 
 from jarvis.server import JarvisServer
+from core.telegram_bot import telegram_bot_handler
 
 log = logging.getLogger("jarvis.websocket")
 
@@ -135,10 +141,66 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "clients": len(connected_clients)}
+    telegram_status = "running" if telegram_bot_handler.is_running() else "stopped"
+    return {
+        "status": "healthy",
+        "clients": len(connected_clients),
+        "telegram_bot": telegram_status,
+    }
 
 
-def run_server(host: str = "localhost", port: int = 8000, debug: bool = True):
+@app.get("/telegram/status")
+async def telegram_status():
+    """Get Telegram bot status"""
+    return telegram_bot_handler.get_stats()
+
+
+@app.post("/telegram/start")
+async def telegram_start():
+    """Start Telegram bot"""
+    success = await telegram_bot_handler.start(jarvis_server)
+    return {"started": success, "running": telegram_bot_handler.is_running()}
+
+
+@app.post("/telegram/stop")
+async def telegram_stop():
+    """Stop Telegram bot"""
+    await telegram_bot_handler.stop()
+    return {"running": telegram_bot_handler.is_running()}
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start Telegram bot on server startup."""
+    log.info("[SERVER] Starting up...")
+    # Telegram bot will be started here if TELEGRAM_BOT_TOKEN is set
+    import os
+
+    if os.environ.get("TELEGRAM_BOT_TOKEN"):
+        try:
+            success = await telegram_bot_handler.start(jarvis_server)
+            if success:
+                log.info("[TELEGRAM] Bot started automatically with server")
+            else:
+                log.warning("[TELEGRAM] Bot failed to start (check TELEGRAM_BOT_TOKEN)")
+        except Exception as e:
+            log.error(f"[TELEGRAM] Error starting bot: {e}")
+    else:
+        log.info("[TELEGRAM] Bot not started (TELEGRAM_BOT_TOKEN not set)")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop Telegram bot on server shutdown."""
+    log.info("[SERVER] Shutting down...")
+    if telegram_bot_handler.is_running():
+        await telegram_bot_handler.stop()
+        log.info("[TELEGRAM] Bot stopped")
+
+
+def run_server(
+    host: str = "localhost", port: int = 8000, debug: bool = True, enable_telegram: bool = True
+):
     """Run the WebSocket server"""
     import uvicorn
 
