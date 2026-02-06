@@ -1,3 +1,15 @@
+"""
+Memory system for JARVIS.
+
+Provides multiple memory types:
+- ConversationMemory: Chat history and facts
+- VectorMemory: Semantic search and embeddings
+- SemanticMemory: Enhanced memory with importance scoring
+- EpisodicMemory: Temporal experiences and events
+- ProceduralMemory: Skills and procedures
+- KnowledgeGraph: Entity relationships and inference
+"""
+
 from __future__ import annotations
 
 import json
@@ -6,15 +18,79 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .extractor import FactExtractor, get_fact_extractor
-from .vector import VectorMemory, get_vector_memory
+# Original memory systems
+from core.memory.episodic import (
+    Episode,
+    EpisodeQuery,
+    EpisodeType,
+    EpisodicMemory,
+    TemporalSequence,
+    get_episodic_memory,
+)
+from core.memory.extractor import FactExtractor, get_fact_extractor
+from core.memory.knowledge_graph import (
+    Entity,
+    EntityType,
+    InferenceRule,
+    KnowledgeGraph,
+    QueryResult,
+    RelationType,
+    Relationship,
+    get_knowledge_graph,
+)
+from core.memory.procedural import (
+    ExecutionResult,
+    Procedure,
+    ProceduralMemory,
+    Skill,
+    SkillLevel,
+    Step,
+    get_procedural_memory,
+)
+from core.memory.semantic_memory import (
+    EnhancedMemorySystem,
+    SemanticMemory,
+    enhanced_memory,
+    get_enhanced_memory,
+)
+from core.memory.vector import VectorMemory, get_vector_memory
 
 __all__ = [
+    # Original
     "ConversationMemory",
     "VectorMemory",
     "get_vector_memory",
     "FactExtractor",
     "get_fact_extractor",
+    # Enhanced semantic memory
+    "SemanticMemory",
+    "EnhancedMemorySystem",
+    "enhanced_memory",
+    "get_enhanced_memory",
+    # Episodic memory
+    "EpisodicMemory",
+    "Episode",
+    "EpisodeType",
+    "EpisodeQuery",
+    "TemporalSequence",
+    "get_episodic_memory",
+    # Procedural memory
+    "ProceduralMemory",
+    "Procedure",
+    "Step",
+    "Skill",
+    "SkillLevel",
+    "ExecutionResult",
+    "get_procedural_memory",
+    # Knowledge graph
+    "KnowledgeGraph",
+    "Entity",
+    "Relationship",
+    "EntityType",
+    "RelationType",
+    "QueryResult",
+    "InferenceRule",
+    "get_knowledge_graph",
 ]
 
 
@@ -57,11 +133,11 @@ class ConversationMemory:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_messages_conversation
-                    ON messages(conversation_id);
+                ON messages(conversation_id);
                 CREATE INDEX IF NOT EXISTS idx_facts_category
-                    ON facts(category);
+                ON facts(category);
                 CREATE INDEX IF NOT EXISTS idx_conversations_session
-                    ON conversations(session_id);
+                ON conversations(session_id);
             """)
 
     def create_conversation(self, session_id: str | None = None) -> int:

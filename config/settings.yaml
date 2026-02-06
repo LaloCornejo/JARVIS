@@ -1,6 +1,7 @@
 jarvis:
   name: "JARVIS"
   wake_word: "hey jarvis"
+  timezone: "America/Mexico_City"  # Your local timezone
 
 llm:
   backend: ollama
@@ -70,3 +71,83 @@ security:
     - cat
     - grep
     - python
+
+# MCP (Model Context Protocol) Configuration
+mcp:
+  enabled: true
+  auto_connect: true
+  
+  servers:
+    # Tier 1: Essential (Official MCP Servers)
+    filesystem:
+      enabled: true
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+      env: {}
+    
+    fetch:
+      enabled: true
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-fetch"]
+      env: {}
+    
+    github:
+      enabled: false  # Requires GITHUB_PERSONAL_ACCESS_TOKEN
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-github"]
+      env:
+        GITHUB_PERSONAL_ACCESS_TOKEN: ""  # Set via env var
+    
+    sequentialthinking:
+      enabled: true
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-sequentialthinking"]
+      env: {}
+    
+    memory:
+      enabled: true
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-memory"]
+      env: {}
+    
+    # Tier 2: Highly Valuable
+    sqlite:
+      enabled: true
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-sqlite", "./data/jarvis.db"]
+      env: {}
+    
+    redis:
+      enabled: false  # Requires Redis server running
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-redis"]
+      env:
+        REDIS_URL: "redis://localhost:6379"
+    
+    playwright:
+      enabled: true
+      command: npx
+      args: ["-y", "@anthropic-ai/mcp-playwright"]
+      env: {}
+    
+    # Third-party/community servers
+    context7:
+      enabled: true
+      command: npx
+      args: ["-y", "@upstash/context7-mcp"]
+      env: {}
+    
+    exa:
+      enabled: false  # Requires EXA_API_KEY
+      command: npx
+      args: ["-y", "@exa-labs/mcp"]
+      env:
+        EXA_API_KEY: ""  # Set via env var
+    
+    browserbase:
+      enabled: false  # Requires BROWSERBASE_API_KEY
+      command: npx
+      args: ["-y", "@browserbasehq/mcp-server-browserbase"]
+      env:
+        BROWSERBASE_API_KEY: ""
+        BROWSERBASE_PROJECT_ID: ""

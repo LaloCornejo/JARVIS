@@ -136,3 +136,8 @@ class Config:
             return config_ids
 
         return None  # No whitelist = allow all
+
+    @property
+    def timezone(self) -> str:
+        """Get the configured timezone."""
+        return self.get("jarvis.timezone", "America/Mexico_City")

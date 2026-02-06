@@ -108,7 +108,11 @@ class TelegramBotHandler:
             "/help": self._handle_help,
             "/status": self._handle_status,
             "/clear": self._handle_clear,
+            "/restart": self._handle_restart,
         }
+
+        # Restart callback - set by external code to handle restart
+        self._restart_callback: Callable | None = None
 
         # Bot info
         self._bot_info: dict | None = None
@@ -423,6 +427,7 @@ Commands:
 /help - Show this help
 /status - Check status
 /clear - Clear history
+/restart - Restart JARVIS server (admin only)
 
 Your messages are processed through JARVIS AI."""
         await self._send_message(session.chat_id, help_text)
@@ -448,6 +453,41 @@ Your Session:
         """Handle /clear command."""
         session.messages.clear()
         await self._send_message(session.chat_id, "🗑️ Conversation history cleared!")
+
+    async def _handle_restart(self, session: ChatSession, text: str) -> None:
+        """Handle /restart command - restarts JARVIS server."""
+        await self._send_message(
+            session.chat_id,
+            "🔄 Restarting JARVIS server...\nThis may take a few moments. The bot will be back online shortly.",
+        )
+
+        log.warning(
+            f"[TELEGRAM] Restart requested by {session.first_name or session.username} (chat_id: {session.chat_id})"
+        )
+
+        # Trigger restart if callback is set
+        if self._restart_callback:
+            try:
+                # Run restart in background so we can send the message first
+                asyncio.create_task(self._trigger_restart())
+            except Exception as e:
+                log.error(f"[TELEGRAM] Error triggering restart: {e}")
+                await self._send_message(session.chat_id, f"❌ Failed to restart: {e}")
+        else:
+            await self._send_message(
+                session.chat_id, "⚠️ Restart is not configured. Please restart the server manually."
+            )
+
+    async def _trigger_restart(self) -> None:
+        """Trigger the restart callback after a short delay to allow message to be sent."""
+        await asyncio.sleep(2)  # Give time for the restart message to be delivered
+        if self._restart_callback:
+            await self._restart_callback()
+
+    def set_restart_callback(self, callback: Callable) -> None:
+        """Set the callback function that will be called to restart the server."""
+        self._restart_callback = callback
+        log.info("[TELEGRAM] Restart callback registered")
 
 
 # Global handler instance

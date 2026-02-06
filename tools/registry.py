@@ -119,6 +119,19 @@ from tools.rust_performance_tools import (
     RustFileSearchTool,
     RustLineCountTool,
 )
+from tools.enhanced import (
+    AgentExecuteTool,
+    CheckAnomaliesTool,
+    CreateUserTool,
+    CreateWorkflowTool,
+    GetConversationHistoryTool,
+    GetSuggestionsTool,
+    GetUserStatsTool,
+    GetUsersTool,
+    ListAgentsTool,
+    ListWorkflowsTool,
+    RecallEpisodicMemoryTool,
+)
 from tools.system import (
     GetCurrentTimeTool,
     LaunchAppTool,
@@ -456,6 +469,87 @@ TOOL_CATEGORIES = {
             "analyze",
         ],
     },
+    "agents": {
+        "tools": [
+            "agent_execute",
+            "list_agents",
+        ],
+        "keywords": [
+            "agent",
+            "specialized",
+            "code review",
+            "research",
+            "creative",
+            "planning",
+            "analyze code",
+            "write story",
+            "plan project",
+        ],
+    },
+    "workflows": {
+        "tools": [
+            "create_workflow",
+            "list_workflows",
+        ],
+        "keywords": [
+            "workflow",
+            "automation",
+            "automate",
+            "trigger",
+            "schedule",
+            "recurring",
+            "periodic",
+            "routine",
+        ],
+    },
+    "users": {
+        "tools": [
+            "create_user",
+            "get_users",
+            "get_user_stats",
+        ],
+        "keywords": [
+            "user",
+            "profile",
+            "account",
+            "person",
+            "who am i",
+            "switch user",
+            "create user",
+        ],
+    },
+    "episodic_memory": {
+        "tools": [
+            "recall_episodic_memory",
+            "get_conversation_history",
+        ],
+        "keywords": [
+            "remember",
+            "what did we",
+            "conversation history",
+            "past conversation",
+            "what was",
+            "earlier",
+            "previously",
+            "last time",
+        ],
+    },
+    "predictions": {
+        "tools": [
+            "get_suggestions",
+            "check_anomalies",
+        ],
+        "keywords": [
+            "suggest",
+            "recommendation",
+            "what should i",
+            "anomaly",
+            "unusual",
+            "strange",
+            "warning",
+            "alert",
+        ],
+    },
 }
 
 CORE_TOOLS = ["get_current_time", "web_search", "run_command", "list_open_apps", "launch_app"]
@@ -611,6 +705,18 @@ class ToolRegistry:
             VolumeDownTool(),  # System volume control
             MuteToggleTool(),  # System volume control
             SetVolumeTool(),  # System volume control
+            # Phase 6: Enhanced tools
+            AgentExecuteTool(),  # Execute requests through specialized agents
+            ListAgentsTool(),  # List available agents
+            CreateWorkflowTool(),  # Create automated workflows
+            ListWorkflowsTool(),  # List active workflows
+            CreateUserTool(),  # Create user profiles
+            GetUsersTool(),  # List all users
+            GetUserStatsTool(),  # Get user statistics
+            RecallEpisodicMemoryTool(),  # Recall past conversations
+            GetSuggestionsTool(),  # Get smart suggestions
+            CheckAnomaliesTool(),  # Check for anomalies
+            GetConversationHistoryTool(),  # Get conversation history
         ]
         for tool in default_tools:
             self.register(tool)
@@ -865,4 +971,21 @@ class ToolRegistry:
         except Exception:
             pass  # Don't fail if monitoring isn't available
 
-        return result
+            return result
+
+    async def initialize_mcp(self) -> dict[str, bool]:
+        """Initialize MCP integration and register MCP tools."""
+        try:
+            from core.mcp.bridge import initialize_mcp_tools
+
+            results = await initialize_mcp_tools(self)
+            connected = sum(1 for success in results.values() if success)
+            logging.info(f"MCP initialized: {connected}/{len(results)} servers connected")
+            return results
+        except Exception as e:
+            logging.error(f"Failed to initialize MCP: {e}")
+            return {}
+
+    def get_mcp_tools(self) -> list[str]:
+        """Get list of MCP-bridged tools."""
+        return [name for name in self._tools.keys() if name.startswith("mcp_")]

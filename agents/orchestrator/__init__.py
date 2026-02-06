@@ -1,16 +1,57 @@
+"""
+Agent Orchestrator for JARVIS.
+
+This module provides two orchestrator implementations:
+1. Orchestrator (Legacy) - Simple agent routing
+2. AgentOrchestrator (Enhanced) - Advanced multi-agent collaboration
+"""
+
 from __future__ import annotations
 
 from typing import Any
 
 from agents.base import AgentContext, AgentMessage, AgentRole, BaseAgent
-from agents.specialized import CodeAgent, MemoryAgent, ResearchAgent, TaskAgent
+from agents.specialized import CodeReviewAgent, CreativeAgent, PlanningAgent, ResearchAgent
+from agents.specialized.legacy import (
+    LegacyCodeAgent as CodeAgent,
+    LegacyMemoryAgent as MemoryAgent,
+    LegacyResearchAgent as _LegacyResearchAgent,
+    LegacyTaskAgent as TaskAgent,
+)
 from core.llm import OllamaClient
 from core.memory import ConversationMemory
 from core.rag import RAGEngine
 from tools.registry import ToolRegistry, get_tool_registry
 
+from .advanced import (
+    AgentCollaboration,
+    AgentOrchestrator,
+    RoutingDecision,
+    get_orchestrator,
+    reset_orchestrator,
+)
+
+# Export both implementations
+__all__ = [
+    # Legacy orchestrator
+    "Orchestrator",
+    # Enhanced orchestrator
+    "AgentOrchestrator",
+    "AgentCollaboration",
+    "RoutingDecision",
+    "get_orchestrator",
+    "reset_orchestrator",
+]
+
 
 class Orchestrator:
+    """
+    Legacy orchestrator with basic agent routing.
+
+    This is the original implementation for backward compatibility.
+    For new code, consider using AgentOrchestrator for advanced features.
+    """
+
     def __init__(
         self,
         llm: OllamaClient | None = None,
@@ -23,8 +64,9 @@ class Orchestrator:
         self.memory = memory or ConversationMemory()
         self.rag = rag
 
+        # Use legacy agents for backward compatibility
         self.agents: dict[AgentRole, BaseAgent] = {
-            AgentRole.RESEARCH: ResearchAgent(self.llm, self.tools, self.rag),
+            AgentRole.RESEARCH: _LegacyResearchAgent(self.llm, self.tools, self.rag),
             AgentRole.CODE: CodeAgent(self.llm, self.tools),
             AgentRole.TASK: TaskAgent(self.llm, self.tools),
             AgentRole.MEMORY: MemoryAgent(self.llm, self.rag),
@@ -144,6 +186,26 @@ Be concise, helpful, and proactive."""
             else:
                 results.append(f"Error: {result.error}")
         return "\n".join(results)
+
+    def _parse_tool_calls_from_text(self, content: str) -> list[dict]:
+        """Parse tool calls embedded in text"""
+        import re
+
+        tool_calls = []
+        pattern = r"<tool_call>(.*?)</tool_call>"
+        matches = re.findall(pattern, content, re.DOTALL)
+
+        for match in matches:
+            try:
+                import json
+
+                call = json.loads(match.strip())
+                if isinstance(call, dict) and "function" in call:
+                    tool_calls.append(call)
+            except json.JSONDecodeError:
+                continue
+
+        return tool_calls
 
     async def store_fact(self, key: str, value: Any, category: str | None = None) -> None:
         self.memory.store_fact(key, value, category)

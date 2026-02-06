@@ -178,6 +178,20 @@ async def startup_event():
 
     if os.environ.get("TELEGRAM_BOT_TOKEN"):
         try:
+            # Set restart callback before starting bot
+            from core.telegram_bot import telegram_bot_handler
+
+            async def restart_server():
+                """Callback to restart the server."""
+                log.warning("[SERVER] Restart requested via Telegram")
+                # Signal shutdown - wrapper script should restart
+                import sys
+
+                # Exit with special code that wrapper script will detect
+                sys.exit(42)  # 42 = restart code
+
+            telegram_bot_handler.set_restart_callback(restart_server)
+
             success = await telegram_bot_handler.start(jarvis_server)
             if success:
                 log.info("[TELEGRAM] Bot started automatically with server")

@@ -28,6 +28,16 @@ from core.voice.tts import TextToSpeech
 from core.voice.vad import VoiceActivityDetector
 from core.voice.wake_word import WakeWordDetector
 
+# Phase 6: Integration imports
+from agents.orchestrator.advanced import AgentOrchestrator
+from core.multi_user.user_manager import UserManager
+from core.multi_user.voice_recognition import VoiceRecognition
+from core.prediction.suggestion_engine import SmartSuggestionEngine
+from core.prediction.anomaly_detector import AnomalyDetector
+from core.prediction.pattern_analyzer import PatternAnalyzer
+from core.automation.triggers import TriggerManager, TimeTrigger
+from core.memory.episodic import EpisodicMemory
+
 if TYPE_CHECKING:
     from tools import ToolRegistry
 
@@ -101,12 +111,26 @@ class VoiceAssistant:
         self.learning = SelfImprovement(data_dir / "learning.db")
         self.permissions = PermissionManager(data_dir / "permissions.db")
         self.proactive = ProactiveMonitor()
+        self._on_send_websocket = on_send_websocket
 
         # Phase 1: Core Intelligence Enhancements
         self.vision_processor = None  # Initialize lazily
         self.enhanced_memory = None  # Initialize lazily
         self.reasoner = None  # Initialize lazily
         self.planner = None  # Initialize lazily
+
+        # Phase 6: New System Integration
+        self.agent_orchestrator: AgentOrchestrator | None = None
+        self.user_manager: UserManager | None = None
+        self.voice_recognition: VoiceRecognition | None = None
+        self.suggestion_engine: SmartSuggestionEngine | None = None
+        self.anomaly_detector: AnomalyDetector | None = None
+        self.pattern_analyzer: PatternAnalyzer | None = None
+        self.trigger_manager: TriggerManager | None = None
+        self.episodic_memory: EpisodicMemory | None = None
+        self._current_user_id: str | None = None
+        self._workflow_check_interval = 30  # seconds
+        self._last_workflow_check = 0
 
         # Concurrency management
         self.threading_manager = ThreadingManager()
@@ -166,6 +190,100 @@ class VoiceAssistant:
         if self.planner is None:
             self.planner = await get_planner()
         return self.planner
+
+    async def _get_agent_orchestrator(self):
+        """Get agent orchestrator (lazy initialization)"""
+        if self.agent_orchestrator is None:
+            self.agent_orchestrator = AgentOrchestrator()
+            # Register specialized agents
+            from agents.specialized import (
+                CodeReviewAgent,
+                ResearchAgent,
+                CreativeAgent,
+                PlanningAgent,
+            )
+            from agents.base import AgentRole
+
+            try:
+                self.agent_orchestrator.register_agent(
+                    "code_review", CodeReviewAgent(), AgentRole.CODE
+                )
+                self.agent_orchestrator.register_agent(
+                    "research", ResearchAgent(), AgentRole.RESEARCH
+                )
+                self.agent_orchestrator.register_agent(
+                    "creative", CreativeAgent(), AgentRole.CREATIVE
+                )
+                self.agent_orchestrator.register_agent(
+                    "planning", PlanningAgent(), AgentRole.PLANNING
+                )
+            except Exception as e:
+                log.warning(f"Failed to register some agents: {e}")
+        return self.agent_orchestrator
+
+    async def _get_user_manager(self):
+        """Get user manager (lazy initialization)"""
+        if self.user_manager is None:
+            from pathlib import Path
+
+            data_dir = Path("data")
+            data_dir.mkdir(exist_ok=True)
+            self.user_manager = UserManager(data_dir / "users.db")
+        return self.user_manager
+
+    async def _get_voice_recognition(self):
+        """Get voice recognition (lazy initialization)"""
+        if self.voice_recognition is None:
+            from pathlib import Path
+
+            data_dir = Path("data")
+            data_dir.mkdir(exist_ok=True)
+            self.voice_recognition = VoiceRecognition(data_dir / "voice_profiles")
+        return self.voice_recognition
+
+    async def _get_suggestion_engine(self):
+        """Get suggestion engine (lazy initialization)"""
+        if self.suggestion_engine is None:
+            self.suggestion_engine = SmartSuggestionEngine()
+        return self.suggestion_engine
+
+    async def _get_anomaly_detector(self):
+        """Get anomaly detector (lazy initialization)"""
+        if self.anomaly_detector is None:
+            self.anomaly_detector = AnomalyDetector()
+        return self.anomaly_detector
+
+    async def _get_pattern_analyzer(self):
+        """Get pattern analyzer (lazy initialization)"""
+        if self.pattern_analyzer is None:
+            self.pattern_analyzer = PatternAnalyzer()
+        return self.pattern_analyzer
+
+    async def _get_trigger_manager(self):
+        """Get trigger manager (lazy initialization)"""
+        if self.trigger_manager is None:
+            from datetime import timedelta
+
+            self.trigger_manager = TriggerManager()
+            # Set up default health check trigger
+            health_trigger = TimeTrigger(
+                trigger_id="health_check",
+                name="Health Check Trigger",
+                workflow_id="system_health",
+                interval=timedelta(minutes=5),
+            )
+            await self.trigger_manager.register_trigger(health_trigger)
+        return self.trigger_manager
+
+    async def _get_episodic_memory(self):
+        """Get episodic memory (lazy initialization)"""
+        if self.episodic_memory is None:
+            from pathlib import Path
+
+            data_dir = Path("data")
+            data_dir.mkdir(exist_ok=True)
+            self.episodic_memory = EpisodicMemory(data_dir / "episodic_memory.db")
+        return self.episodic_memory
 
     def set_model(self, backend: str, model: str) -> None:
         if backend == "auto":
@@ -241,11 +359,58 @@ class VoiceAssistant:
 
             log.info(f"Sending to WebSocket: {text[:100]}...")
             await self.websocket.send(json.dumps({"type": "user_message", "content": text}))
-            if self.on_send_websocket:
-                self.on_send_websocket(text)
+            if self._on_send_websocket:
+                self._on_send_websocket(text)
             return None  # Response will come through WebSocket
 
         await self._conversation_buffer.add_message({"role": "user", "content": text})
+
+        # Phase 6: Log to episodic memory
+        try:
+            episodic = await self._get_episodic_memory()
+            await episodic.record_conversation(user_input=text, user_id=self._current_user_id)
+        except Exception as e:
+            log.debug(f"Failed to log to episodic memory: {e}")
+
+        # Phase 6: Check if request should be routed through specialized agent
+        try:
+            orchestrator = await self._get_agent_orchestrator()
+            routing = await orchestrator.route_request(text)
+
+            if routing["use_agent"] and routing["confidence"] > 0.7:
+                log.info(
+                    f"Routing to specialized agent: {routing['agent_type']} (confidence: {routing['confidence']:.2f})"
+                )
+                agent_response = await orchestrator.process_with_agent(
+                    agent_type=routing["agent_type"],
+                    request=text,
+                    context={"user_id": self._current_user_id},
+                )
+
+                if agent_response["success"]:
+                    response_text = agent_response["response"]
+                    await self._conversation_buffer.add_message(
+                        {"role": "assistant", "content": response_text}
+                    )
+
+                    # Log agent response to episodic memory
+                    try:
+                        await episodic.record_action(
+                            action_type="agent_response",
+                            description=f"Agent {routing['agent_type']} responded",
+                            outcome={"response": response_text[:200]},
+                            user_id=self._current_user_id,
+                        )
+                    except Exception:
+                        pass
+
+                    return response_text
+                else:
+                    log.warning(
+                        f"Agent processing failed: {agent_response.get('error')}, falling back to standard processing"
+                    )
+        except Exception as e:
+            log.debug(f"Agent routing failed: {e}, using standard processing")
 
         # Automatically recall relevant memories
         relevant_memories = await self._recall_relevant_memories(text)
@@ -265,6 +430,20 @@ class VoiceAssistant:
             "about the system, files, applications, or perform any actions. "
             "Do NOT say you cannot do something if there is a tool available for it."
         )
+
+        # Phase 6: Add user context if available
+        if self._current_user_id:
+            try:
+                user_manager = await self._get_user_manager()
+                user = await user_manager.get_user(self._current_user_id)
+                if user:
+                    system_prompt += f"\n\nYou are speaking with {user.name}."
+                    if user.preferences.get("formality") == "casual":
+                        system_prompt += " Use a casual, friendly tone."
+                    elif user.preferences.get("formality") == "formal":
+                        system_prompt += " Use a formal, professional tone."
+            except Exception as e:
+                log.debug(f"Failed to get user context: {e}")
 
         # Add memory context if available
         if relevant_memories:
@@ -649,7 +828,7 @@ class VoiceAssistant:
         if self._loop:
             self._loop.call_soon_threadsafe(lambda: asyncio.create_task(cancel_all_tasks()))
 
-    async def handle_wake_word(self) -> None:
+    async def handle_wake_word(self, audio_samples: np.ndarray | None = None) -> None:
         # If already listening, just reset the buffer and continue
         if self.state == AssistantState.LISTENING:
             log.info("Wake word detected while already listening - resetting buffer")
@@ -670,6 +849,30 @@ class VoiceAssistant:
         self.set_state(AssistantState.LISTENING)
         self._audio_buffer = []
         self._silence_frames = 0
+
+        # Phase 6: Attempt voice identification if audio samples provided
+        if audio_samples is not None:
+            try:
+                voice_recognition = await self._get_voice_recognition()
+                identification = await voice_recognition.identify_speaker(audio_samples)
+
+                if identification["success"] and identification["confidence"] > 0.6:
+                    self._current_user_id = identification["speaker_id"]
+                    log.info(
+                        f"Identified user via voice: {identification['speaker_name']} (confidence: {identification['confidence']:.2f})"
+                    )
+
+                    # Update user context
+                    user_manager = await self._get_user_manager()
+                    await user_manager.record_interaction(self._current_user_id)
+                else:
+                    log.debug(
+                        f"Voice identification uncertain: {identification.get('confidence', 0):.2f}"
+                    )
+                    self._current_user_id = None
+            except Exception as e:
+                log.debug(f"Voice identification failed: {e}")
+                self._current_user_id = None
 
         # Start audio stream for speech capture
         self._start_audio_stream()
@@ -907,6 +1110,7 @@ class VoiceAssistant:
 
     async def run(self) -> None:
         audio_task = None
+        workflow_task = None
         try:
             log.info("VoiceAssistant.run() starting")
             self._running = True
@@ -922,6 +1126,18 @@ class VoiceAssistant:
                 self.proactive.setup_standard_monitors()
                 self.proactive.start()
 
+                # Phase 6: Initialize new systems
+                log.info("Initializing new JARVIS systems...")
+                await self._get_agent_orchestrator()
+                await self._get_user_manager()
+                await self._get_voice_recognition()
+                await self._get_suggestion_engine()
+                await self._get_anomaly_detector()
+                await self._get_pattern_analyzer()
+                await self._get_trigger_manager()
+                await self._get_episodic_memory()
+                log.info("All systems initialized successfully")
+
                 self.vad.is_speech(np.zeros(self._chunk_size, dtype=np.float32))
 
                 log.info("Downloading wake word models if needed")
@@ -934,6 +1150,9 @@ class VoiceAssistant:
                 log.info("Starting audio stream")
                 audio_task = asyncio.create_task(self._process_audio_queue())
 
+                # Phase 6: Start workflow trigger checking
+                workflow_task = asyncio.create_task(self._workflow_check_loop())
+
                 while self._running:
                     await asyncio.sleep(0.1)
         except Exception as e:
@@ -942,12 +1161,129 @@ class VoiceAssistant:
             self._running = False
             if audio_task:
                 audio_task.cancel()
+            if workflow_task:
+                workflow_task.cancel()
             await self.threading_manager.cancel_all_tasks()
+
+    async def _workflow_check_loop(self) -> None:
+        """Periodically check workflow triggers"""
+        log.info("Starting workflow check loop")
+        while self._running:
+            try:
+                await asyncio.sleep(self._workflow_check_interval)
+
+                if not self._running:
+                    break
+
+                # Check trigger manager
+                trigger_manager = await self._get_trigger_manager()
+                triggered = await trigger_manager.check_all()
+
+                for trigger_id in triggered:
+                    log.info(f"Workflow trigger activated: {trigger_id}")
+                    # Execute associated workflow action
+                    await self._execute_trigger_action(trigger_id)
+
+                # Phase 6: Check for anomalies
+                await self._check_anomalies()
+
+                # Phase 6: Generate proactive suggestions
+                await self._generate_proactive_suggestions()
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                log.debug(f"Workflow check error: {e}")
+
+    async def _execute_trigger_action(self, trigger_id: str) -> None:
+        """Execute action associated with a trigger"""
+        try:
+            # Map trigger IDs to actions
+            if trigger_id == "health_check":
+                health = await self.health_check()
+                failed = [k for k, v in health.items() if not v]
+                if failed:
+                    log.warning(f"Health check failed for: {', '.join(failed)}")
+            # Add more trigger actions as needed
+        except Exception as e:
+            log.error(f"Failed to execute trigger action for {trigger_id}: {e}")
+
+    async def _check_anomalies(self) -> None:
+        """Check for system anomalies"""
+        try:
+            anomaly_detector = await self._get_anomaly_detector()
+
+            # Check system health for anomalies
+            health = await self.health_check()
+            health_data = {
+                "tts_online": health.get("tts", False),
+                "stt_online": health.get("stt", False),
+                "vad_online": health.get("vad", False),
+                "wake_word_online": health.get("wake_word", False),
+            }
+
+            anomaly_result = await anomaly_detector.check_system_health(health_data)
+
+            if anomaly_result.get("is_anomaly", False):
+                log.warning(f"System anomaly detected: {anomaly_result}")
+                if self._on_alert:
+                    self._on_alert(
+                        {
+                            "type": "anomaly",
+                            "severity": anomaly_result.get("severity", "low"),
+                            "details": anomaly_result,
+                        }
+                    )
+        except Exception as e:
+            log.debug(f"Anomaly check failed: {e}")
+
+    async def _generate_proactive_suggestions(self) -> None:
+        """Generate proactive suggestions based on patterns"""
+        try:
+            if not self._current_user_id:
+                return
+
+            suggestion_engine = await self._get_suggestion_engine()
+
+            context = {
+                "time_of_day": asyncio.get_event_loop().time(),
+                "user_id": self._current_user_id,
+                "active_applications": [],  # Could be populated from system tools
+            }
+
+            suggestions = await suggestion_engine.generate_suggestions(
+                user_id=self._current_user_id, context=context
+            )
+
+            # Filter for high-priority suggestions
+            high_priority = [s for s in suggestions if s.get("priority") == "high"]
+
+            for suggestion in high_priority:
+                log.info(f"Proactive suggestion: {suggestion.get('message')}")
+                if self._on_alert:
+                    self._on_alert(
+                        {
+                            "type": "suggestion",
+                            "message": suggestion.get("message"),
+                            "action": suggestion.get("suggested_action"),
+                        }
+                    )
+        except Exception as e:
+            log.debug(f"Proactive suggestion generation failed: {e}")
 
     async def stop(self) -> None:
         self._running = False
         self.wake_word.stop()
         self.proactive.stop()
+
+        # Phase 6: Clean up new systems
+        if self.agent_orchestrator:
+            await self.agent_orchestrator.shutdown()
+        if self.user_manager:
+            await self.user_manager.close()
+        if self.episodic_memory:
+            await self.episodic_memory.close()
+
         await self.llm.close()
         await self.tts.close()
         await self.threading_manager.cancel_all_tasks()
@@ -969,6 +1305,78 @@ class VoiceAssistant:
 
     def get_improvement_report(self, days: int = 7) -> dict:
         return self.learning.get_improvement_report(days)
+
+    # Phase 6: New utility methods
+    async def create_user(self, name: str, voice_samples: list | None = None) -> dict:
+        """Create a new user with optional voice enrollment"""
+        try:
+            user_manager = await self._get_user_manager()
+            user_id = await user_manager.create_user(name=name)
+
+            if voice_samples:
+                voice_recognition = await self._get_voice_recognition()
+                for sample in voice_samples:
+                    await voice_recognition.enroll_user(user_id, sample)
+
+            return {"success": True, "user_id": user_id, "name": name}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def switch_user(self, user_id: str) -> dict:
+        """Switch to a different user context"""
+        try:
+            user_manager = await self._get_user_manager()
+            user = await user_manager.get_user(user_id)
+
+            if user:
+                self._current_user_id = user_id
+                await user_manager.record_interaction(user_id)
+                return {"success": True, "user": user.to_dict()}
+            else:
+                return {"success": False, "error": "User not found"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def get_current_user(self) -> dict | None:
+        """Get current user information"""
+        if not self._current_user_id:
+            return None
+
+        try:
+            user_manager = await self._get_user_manager()
+            user = await user_manager.get_user(self._current_user_id)
+            return user.to_dict() if user else None
+        except Exception:
+            return None
+
+    async def get_conversation_history(self, limit: int = 10) -> list:
+        """Get recent conversation history from episodic memory"""
+        try:
+            episodic = await self._get_episodic_memory()
+            return await episodic.get_recent_episodes(limit=limit, user_id=self._current_user_id)
+        except Exception as e:
+            log.debug(f"Failed to get conversation history: {e}")
+            return []
+
+    async def create_workflow(self, name: str, actions: list, triggers: list | None = None) -> dict:
+        """Create a new automated workflow"""
+        try:
+            trigger_manager = await self._get_trigger_manager()
+            workflow_id = f"workflow_{name}_{asyncio.get_event_loop().time()}"
+
+            # Create time trigger if interval specified
+            if triggers:
+                for trigger_config in triggers:
+                    trigger = TimeTrigger(
+                        trigger_id=f"{workflow_id}_{trigger_config.get('type')}",
+                        schedule_type=trigger_config.get("type", "interval"),
+                        interval_minutes=trigger_config.get("interval_minutes", 60),
+                    )
+                    await trigger_manager.add_trigger(trigger)
+
+            return {"success": True, "workflow_id": workflow_id, "name": name}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     async def health_check(self) -> dict:
         results = {}

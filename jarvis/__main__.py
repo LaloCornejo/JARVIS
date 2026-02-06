@@ -104,17 +104,32 @@ class MessageBubble(Static):
         super().__init__(**kwargs)
         self.content = content
         self.role = role
+        self.text_content = content  # For streaming compatibility
+        self._done = False
 
     def render(self) -> Text:
         text = Text()
+        display_content = self.text_content if hasattr(self, "text_content") else self.content
         if self.role == "user":
             text.append("Laelo\n", style="bold #66aaff")
-            text.append(f"{self.content}\n", style="#cccccc")
+            text.append(f"{display_content}\n", style="#cccccc")
         else:
             text.append("AI\n", style="bold #44aa99")
-            for line in self.content.split("\n"):
+            for line in display_content.split("\n"):
                 text.append(f"{line}\n", style="#aaaaaa")
         return text
+
+    def append_text(self, text: str) -> None:
+        """Append text for streaming responses"""
+        self.text_content += text
+        self.content = self.text_content
+        self.refresh()
+
+    def finish(self) -> None:
+        """Mark streaming as complete"""
+        self._done = True
+        self.content = self.text_content
+        self.refresh()
 
 
 class SystemStatus(Static):
@@ -923,7 +938,7 @@ class JarvisApp(App):
         Binding("p", "show_performance", "Show Performance"),
     ]
 
-    def __init__(self, debug_mode: bool = False, server_url: str = "ws://localhost:6969/ws"):
+    def __init__(self, debug_mode: bool = False, server_url: str = "ws://localhost:8000/ws"):
         super().__init__()
         # Initialize core attributes
         self._debug_mode = debug_mode  # Set debug_mode from parameter
@@ -939,6 +954,19 @@ class JarvisApp(App):
             sample_rate=self.config.tts_sample_rate,
         )
         self.tools = get_tool_registry()
+
+        # Initialize MCP tools
+        async def init_mcp():
+            try:
+                results = await self.tools.initialize_mcp()
+                if results:
+                    connected = sum(1 for success in results.values() if success)
+                    log.info(f"MCP initialized: {connected}/{len(results)} servers connected")
+            except Exception as e:
+                log.error(f"Failed to initialize MCP: {e}")
+
+        # Schedule MCP initialization
+        asyncio.create_task(init_mcp())
 
         # Preload vision model at startup for faster responses
         self._vision_client = get_vision_client()
@@ -1726,9 +1754,7 @@ StreamingBubble {
 
     def _create_streaming_bubble(self, text: str) -> None:
         """Create a streaming bubble for the assistant response."""
-        from .components import Bubble  # Assuming Bubble is imported
-
-        self._streaming_bubble = Bubble("", role="assistant")
+        self._streaming_bubble = MessageBubble("", role="assistant")
         chat = self.query_one("#chat-scroll", VerticalScroll)
         chat.mount(self._streaming_bubble)
 

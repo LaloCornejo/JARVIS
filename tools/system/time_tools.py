@@ -4,6 +4,7 @@ import json
 import subprocess
 from datetime import datetime
 
+from core.config import Config
 from tools.base import BaseTool, ToolResult
 
 
@@ -24,10 +25,15 @@ class GetCurrentTimeTool(BaseTool):
     async def execute(self, timezone: str | None = None) -> ToolResult:
         try:
             cmd = ["get_time"]
-            if timezone:
+
+            # Handle 'auto' or missing timezone - use config
+            if timezone and timezone != "auto":
                 cmd.extend(["--timezone", timezone])
             else:
-                cmd.extend(["--timezone", "America/Mexico_City"])
+                # Use timezone from config
+                config = Config("config/settings.yaml")
+                cmd.extend(["--timezone", config.timezone])
+
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             data = json.loads(result.stdout.strip())
             return ToolResult(success=True, data=data)

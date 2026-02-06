@@ -12,6 +12,8 @@ class AgentRole(Enum):
     CODE = "code"
     TASK = "task"
     MEMORY = "memory"
+    CREATIVE = "creative"
+    PLANNING = "planning"
 
 
 @dataclass
