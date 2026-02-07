@@ -14,9 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
-
-import numpy as np
+from typing import Any, Dict, List, Optional, Tuple
 
 log = logging.getLogger(__name__)
 

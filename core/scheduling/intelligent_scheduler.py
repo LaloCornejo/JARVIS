@@ -12,11 +12,10 @@ This module provides advanced scheduling capabilities including:
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, time
-from typing import Any, Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from enum import Enum
-import json
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 log = logging.getLogger(__name__)
 

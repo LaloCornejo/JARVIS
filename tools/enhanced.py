@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from tools.base import BaseTool, ToolResult
 
@@ -125,7 +124,10 @@ class CreateWorkflowTool(BaseTool):
             },
             "trigger_config": {
                 "type": "object",
-                "description": "Configuration for the trigger (e.g., {'interval_minutes': 60} for time trigger)",
+                "description": (
+                    "Configuration for the trigger "
+                    "(e.g., {'interval_minutes': 60} for time trigger)"
+                ),
             },
             "actions": {
                 "type": "array",
@@ -140,7 +142,7 @@ class CreateWorkflowTool(BaseTool):
         self, name: str, trigger_type: str, trigger_config: dict, actions: list[str]
     ) -> ToolResult:
         try:
-            from core.automation.triggers import TriggerManager, TimeTrigger
+            from core.automation.triggers import TimeTrigger, TriggerManager
 
             trigger_manager = TriggerManager()
 
@@ -337,28 +339,38 @@ class RecallEpisodicMemoryTool(BaseTool):
 
     async def execute(self, query: str, limit: int = 5, memory_type: str = "all") -> ToolResult:
         try:
-            from pathlib import Path
+            from core.memory.episodic import EpisodeQuery, EpisodeType, EpisodicMemory
 
-            from core.memory.episodic import EpisodicMemory
+            episodic = EpisodicMemory()
+            await episodic.initialize()
 
-            data_dir = Path("data")
-            data_dir.mkdir(exist_ok=True)
-            episodic = EpisodicMemory(data_dir / "episodic_memory.db")
+            # Build query based on memory type
+            episode_types = None
+            keywords = [query]
 
             if memory_type == "conversation":
-                memories = await episodic.search_conversations(query=query, limit=limit)
+                episode_types = [EpisodeType.CONVERSATION]
             elif memory_type == "action":
-                memories = await episodic.search_actions(query=query, limit=limit)
+                episode_types = [EpisodeType.ACTION]
             elif memory_type == "learning":
-                memories = await episodic.search_learning(query=query, limit=limit)
-            else:
-                # Search all types
-                conversations = await episodic.search_conversations(query=query, limit=limit)
-                actions = await episodic.search_actions(query=query, limit=limit)
-                memories = conversations + actions
-                memories = sorted(memories, key=lambda x: x.get("timestamp", ""), reverse=True)[
-                    :limit
-                ]
+                episode_types = [EpisodeType.LEARNING]
+            elif memory_type == "observation":
+                episode_types = [EpisodeType.OBSERVATION]
+            elif memory_type == "decision":
+                episode_types = [EpisodeType.DECISION]
+            elif memory_type == "error":
+                episode_types = [EpisodeType.ERROR]
+
+            # Create query and retrieve episodes
+            query_obj = EpisodeQuery(
+                episode_types=episode_types,
+                keywords=keywords,
+                limit=limit,
+            )
+            episodes = await episodic.retrieve_episodes(query_obj)
+
+            # Convert episodes to dict format
+            memories = [ep.to_dict() for ep in episodes]
 
             return ToolResult(success=True, data={"memories": memories})
         except Exception as e:
@@ -454,18 +466,18 @@ class GetConversationHistoryTool(BaseTool):
 
     async def execute(self, limit: int = 10, user_id: str | None = None) -> ToolResult:
         try:
-            from pathlib import Path
-
             from core.memory.episodic import EpisodicMemory
 
-            data_dir = Path("data")
-            data_dir.mkdir(exist_ok=True)
-            episodic = EpisodicMemory(data_dir / "episodic_memory.db")
+            episodic = EpisodicMemory()
+            await episodic.initialize()
 
-            episodes = await episodic.get_recent_episodes(limit=limit, user_id=user_id)
+            # Use recall_conversations method which is the proper way to get conversations
+            episodes = await episodic.recall_conversations(
+                about=None, with_participant=user_id, limit=limit
+            )
 
-            # Filter for conversation episodes
-            conversations = [ep for ep in episodes if ep.get("episode_type") == "conversation"]
+            # Convert episodes to dict format
+            conversations = [ep.to_dict() for ep in episodes]
 
             return ToolResult(success=True, data={"conversations": conversations})
         except Exception as e:

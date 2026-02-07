@@ -102,6 +102,14 @@ from tools.integrations.vlc import (
     VLCStopTool,
     VLCVolumeTool,
 )
+from tools.integrations.whatsapp import (
+    WhatsAppDownloadMediaTool,
+    WhatsAppGetBusinessProfileTool,
+    WhatsAppGetTemplatesTool,
+    WhatsAppSendMediaTool,
+    WhatsAppSendMessageTool,
+    WhatsAppSendTemplateTool,
+)
 from tools.integrations.youtube import (
     YouTubeInfoTool,
     YouTubePlayTool,
@@ -190,4 +198,10 @@ __all__ = [
     "ScreenshotListMonitorsTool",
     "ScreenshotListTool",
     "ScreenshotAnalyzeTool",
+    "WhatsAppSendMessageTool",
+    "WhatsAppSendTemplateTool",
+    "WhatsAppSendMediaTool",
+    "WhatsAppGetTemplatesTool",
+    "WhatsAppGetBusinessProfileTool",
+    "WhatsAppDownloadMediaTool",
 ]

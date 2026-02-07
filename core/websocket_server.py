@@ -1,9 +1,10 @@
 """WebSocket server for JARVIS TUI client communication"""
 
+import asyncio
 import json
 import logging
 import sys
-from typing import Dict, Set
+from typing import Set
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
@@ -15,17 +16,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from rich.console import Console
 from rich.logging import RichHandler
 
-from jarvis.server import JarvisServer
+from core.discord_bot import discord_bot_handler
 from core.telegram_bot import telegram_bot_handler
+from core.whatsapp_bot import whatsapp_bot_handler
+from jarvis.server import JarvisServer
 
 log = logging.getLogger("jarvis.websocket")
 
 
-def setup_logging(debug: bool = True) -> None:
+def setup_logging(debug: bool = False) -> None:  # Changed default to False
     """Setup logging for the server"""
-    level = logging.DEBUG if debug else logging.WARNING
+    level = logging.DEBUG if debug else logging.INFO
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
+
+    # Reduce verbose logging from libraries
+    logging.getLogger("websockets").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+    logging.getLogger("hpack").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     # Reduce verbosity of HTTP libraries
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -142,10 +152,14 @@ async def websocket_endpoint(websocket: WebSocket):
 async def health_check():
     """Health check endpoint"""
     telegram_status = "running" if telegram_bot_handler.is_running() else "stopped"
+    discord_status = "running" if discord_bot_handler.is_running() else "stopped"
+    whatsapp_status = "running" if whatsapp_bot_handler.is_running() else "stopped"
     return {
         "status": "healthy",
         "clients": len(connected_clients),
         "telegram_bot": telegram_status,
+        "discord_bot": discord_status,
+        "whatsapp_bot": whatsapp_status,
     }
 
 
@@ -155,11 +169,37 @@ async def telegram_status():
     return telegram_bot_handler.get_stats()
 
 
+@app.get("/discord/status")
+async def discord_status():
+    """Get Discord bot status"""
+    return discord_bot_handler.get_stats()
+
+
+@app.get("/whatsapp/status")
+async def whatsapp_status():
+    """Get WhatsApp bot status"""
+    return whatsapp_bot_handler.get_stats()
+
+
 @app.post("/telegram/start")
 async def telegram_start():
     """Start Telegram bot"""
     success = await telegram_bot_handler.start(jarvis_server)
     return {"started": success, "running": telegram_bot_handler.is_running()}
+
+
+@app.post("/discord/start")
+async def discord_start():
+    """Start Discord bot"""
+    success = await discord_bot_handler.start(jarvis_server)
+    return {"started": success, "running": discord_bot_handler.is_running()}
+
+
+@app.post("/whatsapp/start")
+async def whatsapp_start():
+    """Start WhatsApp bot"""
+    success = await whatsapp_bot_handler.start(jarvis_server)
+    return {"started": success, "running": whatsapp_bot_handler.is_running()}
 
 
 @app.post("/telegram/stop")
@@ -169,13 +209,27 @@ async def telegram_stop():
     return {"running": telegram_bot_handler.is_running()}
 
 
+@app.post("/discord/stop")
+async def discord_stop():
+    """Stop Discord bot"""
+    await discord_bot_handler.stop()
+    return {"running": discord_bot_handler.is_running()}
+
+
+@app.post("/whatsapp/stop")
+async def whatsapp_stop():
+    """Stop WhatsApp bot"""
+    await whatsapp_bot_handler.stop()
+    return {"running": whatsapp_bot_handler.is_running()}
+
+
 @app.on_event("startup")
 async def startup_event():
-    """Start Telegram bot on server startup."""
+    """Start Telegram, Discord, and WhatsApp bots on server startup."""
     log.info("[SERVER] Starting up...")
-    # Telegram bot will be started here if TELEGRAM_BOT_TOKEN is set
     import os
 
+    # Start Telegram bot if configured
     if os.environ.get("TELEGRAM_BOT_TOKEN"):
         try:
             # Set restart callback before starting bot
@@ -202,14 +256,55 @@ async def startup_event():
     else:
         log.info("[TELEGRAM] Bot not started (TELEGRAM_BOT_TOKEN not set)")
 
+    # Start Discord bot if configured
+    if os.environ.get("DISCORD_BOT_TOKEN"):
+        try:
+            success = await discord_bot_handler.start(jarvis_server)
+            if success:
+                log.info("[DISCORD] Bot started automatically with server")
+            else:
+                log.warning("[DISCORD] Bot failed to start (check DISCORD_BOT_TOKEN)")
+        except Exception as e:
+            log.error(f"[DISCORD] Error starting bot: {e}")
+    else:
+        log.info("[DISCORD] Bot not started (DISCORD_BOT_TOKEN not set)")
+
+    # Initialize WhatsApp bot (QR code login - no credentials needed)
+    try:
+        # Schedule WhatsApp bot startup asynchronously to avoid blocking startup
+        async def start_whatsapp_async():
+            success = await whatsapp_bot_handler.start(jarvis_server)
+            if success:
+                log.info("[WHATSAPP] Bot handler initialized")
+            else:
+                log.warning("[WHATSAPP] Bot handler failed to initialize")
+
+        # Run in background to avoid blocking startup
+        # We need to get the event loop and create task properly
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        loop.create_task(start_whatsapp_async())
+    except Exception as e:
+        log.error(f"[WHATSAPP] Error initializing bot handler: {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Stop Telegram bot on server shutdown."""
+    """Stop Telegram, Discord, and WhatsApp bots on server shutdown."""
     log.info("[SERVER] Shutting down...")
     if telegram_bot_handler.is_running():
         await telegram_bot_handler.stop()
         log.info("[TELEGRAM] Bot stopped")
+    if discord_bot_handler.is_running():
+        await discord_bot_handler.stop()
+        log.info("[DISCORD] Bot stopped")
+    # Stop WhatsApp bot handler
+    await whatsapp_bot_handler.stop()
+    log.info("[WHATSAPP] Bot handler stopped")
 
 
 def run_server(

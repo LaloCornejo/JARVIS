@@ -95,6 +95,17 @@ class TextToSpeech:
             stream.stop()
             stream.close()
 
+    async def health_check(self) -> bool:
+        """Check if the TTS service is available and responsive."""
+        try:
+            # Try to connect to the TTS service
+            client = await self._get_client()
+            response = await client.get(f"{self.base_url}/speakers_list", timeout=5.0)
+            return response.status_code == 200
+        except Exception as e:
+            log.debug(f"TTS health check failed: {e}")
+            return False
+
     async def play_stream_interruptible(
         self,
         text: str,
@@ -130,11 +141,3 @@ class TextToSpeech:
         response = await client.get(f"{self.base_url}/speakers")
         response.raise_for_status()
         return response.json()
-
-    async def health_check(self) -> bool:
-        try:
-            client = await self._get_client()
-            response = await client.get(f"{self.base_url}/speakers_list", timeout=5.0)
-            return response.status_code == 200
-        except Exception:
-            return False

@@ -17,8 +17,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import numpy as np
-
 log = logging.getLogger(__name__)
 
 

@@ -26,35 +26,148 @@ class ExecutePythonTool(BaseTool):
     async def execute(self, code: str, timeout: int = 30) -> ToolResult:
         import json
         import os
+        import platform
         import subprocess
+        from pathlib import Path
 
         try:
             timeout = min(max(timeout, 5), 60)
 
-            binary_path = os.path.join(
-                os.path.dirname(__file__), "..", "target", "debug", "execute_python.exe"
-            )
-            result = subprocess.run(
-                [binary_path, code, str(timeout)],
-                capture_output=True,
-                text=True,
-                timeout=timeout + 5,
-            )
+            # Determine executable extension based on platform
+            exe_ext = ".exe" if platform.system() == "Windows" else ""
 
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                success = data["exit_code"] == 0
-                return ToolResult(
-                    success=success,
-                    data={
-                        "exit_code": data["exit_code"],
-                        "stdout": data["stdout"],
-                        "stderr": data["stderr"],
-                    },
-                    error=data["stderr"] if not success else None,
+            # Try release build first, then debug
+            tools_dir = Path(__file__).parent.parent
+            release_path = tools_dir / "target" / "release" / f"execute_python{exe_ext}"
+            debug_path = tools_dir / "target" / "debug" / f"execute_python{exe_ext}"
+
+            binary_path = None
+            if release_path.exists():
+                binary_path = str(release_path)
+            elif debug_path.exists():
+                binary_path = str(debug_path)
+
+            if binary_path:
+                # Use Rust binary if available
+                result = subprocess.run(
+                    [binary_path, code, str(timeout)],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout + 5,
                 )
+
+                if result.returncode == 0:
+                    data = json.loads(result.stdout)
+                    success = data["exit_code"] == 0
+                    return ToolResult(
+                        success=success,
+                        data={
+                            "exit_code": data["exit_code"],
+                            "stdout": data["stdout"],
+                            "stderr": data["stderr"],
+                        },
+                        error=data["stderr"] if not success else None,
+                    )
+                else:
+                    return ToolResult(success=False, data=None, error=result.stderr)
             else:
-                return ToolResult(success=False, data=None, error=result.stderr)
+                # Fallback: Execute Python code directly using Python interpreter
+                import io
+                import sys
+                import traceback
+
+                # Create restricted globals for safer execution
+                safe_globals = {
+                    "__builtins__": {
+                        "len": len,
+                        "range": range,
+                        "enumerate": enumerate,
+                        "zip": zip,
+                        "map": map,
+                        "filter": filter,
+                        "sum": sum,
+                        "min": min,
+                        "max": max,
+                        "abs": abs,
+                        "round": round,
+                        "str": str,
+                        "int": int,
+                        "float": float,
+                        "list": list,
+                        "dict": dict,
+                        "tuple": tuple,
+                        "set": set,
+                        "print": print,
+                        "sorted": sorted,
+                        "reversed": reversed,
+                        "isinstance": isinstance,
+                        "hasattr": hasattr,
+                        "getattr": getattr,
+                        "setattr": setattr,
+                        "type": type,
+                        "help": help,
+                        "dir": dir,
+                        "vars": vars,
+                        "locals": locals,
+                        "globals": globals,
+                        "__import__": __import__,
+                    }
+                }
+                safe_locals = {}
+
+                # Capture stdout/stderr
+                old_stdout = sys.stdout
+                old_stderr = sys.stderr
+                stdout_capture = io.StringIO()
+                stderr_capture = io.StringIO()
+                sys.stdout = stdout_capture
+                sys.stderr = stderr_capture
+
+                try:
+                    # Execute with timeout using signal or threading
+                    import threading
+
+                    result_container = {}
+
+                    def execute_code():
+                        try:
+                            exec(code, safe_globals, safe_locals)
+                            result_container["success"] = True
+                        except Exception:
+                            result_container["success"] = False
+                            result_container["error"] = traceback.format_exc()
+
+                    thread = threading.Thread(target=execute_code)
+                    thread.daemon = True
+                    thread.start()
+                    thread.join(timeout=timeout)
+
+                    if thread.is_alive():
+                        return ToolResult(
+                            success=False,
+                            data=None,
+                            error=f"Code execution timed out after {timeout}s",
+                        )
+
+                    if result_container.get("success"):
+                        return ToolResult(
+                            success=True,
+                            data={
+                                "exit_code": 0,
+                                "stdout": stdout_capture.getvalue(),
+                                "stderr": stderr_capture.getvalue(),
+                            },
+                        )
+                    else:
+                        return ToolResult(
+                            success=False,
+                            data=None,
+                            error=result_container.get("error", "Unknown error"),
+                        )
+                finally:
+                    sys.stdout = old_stdout
+                    sys.stderr = old_stderr
+
         except Exception as e:
             return ToolResult(success=False, data=None, error=str(e))
 

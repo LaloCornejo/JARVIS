@@ -154,8 +154,8 @@ class CUDAAccelerator:
             return None
 
         try:
-            import torch
             import numpy as np
+            import torch
 
             # Move audio to GPU
             audio_tensor = torch.from_numpy(audio_data.astype(np.float32)).cuda()
@@ -300,7 +300,6 @@ class OpenCLAccelerator:
         """Get OpenCL platform information"""
         platforms_info = []
         try:
-            import pyopencl as cl
 
             for platform in self.platforms:
                 platforms_info.append(

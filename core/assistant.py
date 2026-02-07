@@ -12,31 +12,29 @@ import numpy as np
 import openwakeword
 import sounddevice as sd
 
+# Phase 6: Integration imports
+from agents.orchestrator.advanced import AgentOrchestrator
+from core.automation.triggers import TimeTrigger, TriggerManager
 from core.config import Config
 from core.learning.improvement import SelfImprovement
 from core.llm import ModelRouter, OllamaClient
 from core.llm.copilot import CopilotClient
 from core.llm.gemini import GeminiClient
+from core.memory.episodic import EpisodicMemory
 from core.memory.semantic_memory import get_enhanced_memory
+from core.multi_user.user_manager import UserManager
+from core.multi_user.voice_recognition import VoiceRecognition
+from core.prediction.anomaly_detector import AnomalyDetector
+from core.prediction.pattern_analyzer import PatternAnalyzer
+from core.prediction.suggestion_engine import SmartSuggestionEngine
 from core.proactive import ProactiveMonitor
 from core.reasoning import get_planner, get_reasoner
 from core.security.permissions import PermissionManager
 from core.threading_manager import StreamManager, TaskCoordinator, ThreadingManager
-from core.vision import get_vision_processor
 from core.voice.stt import SpeechToText
 from core.voice.tts import TextToSpeech
 from core.voice.vad import VoiceActivityDetector
 from core.voice.wake_word import WakeWordDetector
-
-# Phase 6: Integration imports
-from agents.orchestrator.advanced import AgentOrchestrator
-from core.multi_user.user_manager import UserManager
-from core.multi_user.voice_recognition import VoiceRecognition
-from core.prediction.suggestion_engine import SmartSuggestionEngine
-from core.prediction.anomaly_detector import AnomalyDetector
-from core.prediction.pattern_analyzer import PatternAnalyzer
-from core.automation.triggers import TriggerManager, TimeTrigger
-from core.memory.episodic import EpisodicMemory
 
 if TYPE_CHECKING:
     from tools import ToolRegistry
@@ -196,13 +194,13 @@ class VoiceAssistant:
         if self.agent_orchestrator is None:
             self.agent_orchestrator = AgentOrchestrator()
             # Register specialized agents
+            from agents.base import AgentRole
             from agents.specialized import (
                 CodeReviewAgent,
-                ResearchAgent,
                 CreativeAgent,
                 PlanningAgent,
+                ResearchAgent,
             )
-            from agents.base import AgentRole
 
             try:
                 self.agent_orchestrator.register_agent(

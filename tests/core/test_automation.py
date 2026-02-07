@@ -1,6 +1,6 @@
 """Tests for Workflow Automation (Triggers)"""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
@@ -10,7 +10,6 @@ from core.automation.triggers import (
     EventTrigger,
     TimeTrigger,
     TriggerManager,
-    TriggerStatus,
     TriggerType,
 )
 

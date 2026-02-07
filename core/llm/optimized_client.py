@@ -82,17 +82,21 @@ class ContextSummarizer:
             return "Previous conversation context"
 
 
-class OptimizedOllamaClient:
-    """Optimized LLM client with advanced streaming capabilities"""
+class OptimizedLLMClient:
+    """Optimized LLM client supporting multiple backends (Ollama, NVIDIA API, etc.)"""
 
     def __init__(
         self,
-        base_url: str = "http://localhost:11434",
-        model: str = "qwen3:1.7b",
+        backend: str = "nvidia",  # Changed default to nvidia
+        base_url: str = "https://integrate.api.nvidia.com/v1",  # Changed default to NVIDIA API
+        api_key: str = None,
+        model: str = "KimiK2.5",  # Changed default to KimiK2.5
         timeout: float = 300.0,
         num_ctx: int | None = None,
     ):
+        self.backend = backend
         self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
         self.model = model
         self.timeout = timeout
         self.num_ctx = num_ctx or 16384  # Default context window
@@ -104,6 +108,10 @@ class OptimizedOllamaClient:
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client with optimizations"""
         if self._client is None:
+            headers = {}
+            if self.backend == "nvidia" and self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(
                     timeout=self.timeout, connect=5.0, read=self.timeout, write=10.0, pool=5.0
@@ -112,6 +120,7 @@ class OptimizedOllamaClient:
                     max_keepalive_connections=10, max_connections=20, keepalive_expiry=120.0
                 ),
                 http2=True,  # Enable HTTP/2 for better streaming
+                headers=headers,
             )
         return self._client
 
@@ -120,6 +129,13 @@ class OptimizedOllamaClient:
         if self._client:
             await self._client.aclose()
             self._client = None
+
+    async def chat(
+        self, messages: list, system: str = None, tools: list = None
+    ) -> AsyncIterator[dict]:
+        """Alias for chat_streaming for backward compatibility"""
+        async for chunk in self.chat_streaming(messages=messages, system=system, tools=tools):
+            yield chunk
 
     async def chat_streaming(
         self,
@@ -154,35 +170,35 @@ class OptimizedOllamaClient:
                     yield chunk
                 return
 
-        # Prepare streaming request
-        request_data = {
-            "model": self.model,
-            "messages": optimized_messages,
-            "stream": True,
-            "options": {
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "top_k": 40,
-                "num_predict": -1,  # Unlimited
-                "stop": ["<|im_start|>", "<|im_end|>", "<|endoftext|>"],
-                "num_ctx": context_window or self.num_ctx,
-                "num_thread": -1,  # Use all available threads
-                "repeat_penalty": 1.1,
-                "repeat_last_n": 64,
-            },
-        }
-
-        if system:
-            request_data["system"] = system
-        if tools:
-            request_data["tools"] = tools
+        # Prepare request based on backend
+        if self.backend == "nvidia":
+            request_data = self._prepare_nvidia_request(
+                optimized_messages, system, tools, context_window
+            )
+            endpoint = "/chat/completions"
+        else:  # Default to Ollama format
+            request_data = self._prepare_ollama_request(
+                optimized_messages, system, tools, context_window
+            )
+            endpoint = "/api/chat"
 
         client = await self._get_client()
 
         try:
+            # Debug: Log request data for troubleshooting
+            import json as json_mod
+
+            log.debug(
+                f"[NVIDIA] Sending request to {endpoint} with {len(request_data.get('messages', []))} messages"
+            )
+            for i, msg in enumerate(request_data.get("messages", [])[:3]):  # Log first 3 messages
+                log.debug(
+                    f"[NVIDIA] Message {i}: role={msg.get('role')}, content_len={len(str(msg.get('content', '')))}, has_tool_calls={bool(msg.get('tool_calls'))}"
+                )
+
             async with client.stream(
                 "POST",
-                f"{self.base_url}/api/chat",
+                f"{self.base_url}{endpoint}",
                 json=request_data,
                 timeout=self.timeout,
             ) as response:
@@ -192,23 +208,82 @@ class OptimizedOllamaClient:
                 buffer = ""
                 chunk_count = 0
 
-                async for line in response.aiter_lines():
-                    if not line.strip():
-                        continue
+                # Handle different streaming formats
+                if self.backend == "nvidia":
+                    # Handle SSE format for NVIDIA API
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
 
-                    try:
-                        data = json.loads(line)
-                        if "error" in data:
-                            yield {"type": "error", "error": data["error"]}
-                            return
+                        try:
+                            parsed_data = self._parse_nvidia_sse_line(line)
 
-                        if "message" in data:
-                            message = data["message"]
+                            if parsed_data.get("done"):
+                                log.debug("[NVIDIA SSE] Stream completed")
+                                break
 
-                            # Handle content streaming
-                            if "content" in message and message["content"]:
-                                content = message["content"]
+                            if "error" in parsed_data:
+                                log.debug(f"[NVIDIA SSE] Error in stream: {parsed_data['error']}")
+                                yield {"type": "error", "error": parsed_data["error"]}
+                                return
+
+                            if "message" in parsed_data:
+                                message = parsed_data["message"]
+                                log.debug(f"[NVIDIA SSE] Message received: {message}")
+
+                                # Handle content streaming
+                                if "content" in message and message["content"]:
+                                    content = message["content"]
+                                    log.debug(f"[NVIDIA SSE] Content chunk: {content}")
+                                    buffer += content
+                                    full_response += content  # Accumulate immediately
+                                    log.debug(
+                                        f"[NVIDIA SSE] Buffer size: {len(buffer)}, Full response size: {len(full_response)}"
+                                    )
+                                    chunk_count += 1
+
+                                    # Intelligent chunking based on content analysis
+                                    should_yield = self._should_yield_chunk(
+                                        buffer, chunk_count, content
+                                    )
+
+                                    if should_yield:
+                                        chunk_data = {
+                                            "type": "content",
+                                            "content": buffer,
+                                            "partial": True,
+                                            "chunk_id": chunk_count,
+                                            "timestamp": asyncio.get_event_loop().time(),
+                                        }
+
+                                        if stream_callback:
+                                            await stream_callback(chunk_data)
+
+                                        yield chunk_data
+                                        log.debug(
+                                            f"[NVIDIA SSE] Yielded chunk {chunk_count}, cleared buffer"
+                                        )
+                                        buffer = ""  # Clear buffer after yielding
+                                elif "tool_calls" in message and message["tool_calls"]:
+                                    # Handle tool calls
+                                    log.debug(
+                                        f"[NVIDIA SSE] Tool calls received: {message['tool_calls']}"
+                                    )
+                                    yield {
+                                        "type": "tool_calls",
+                                        "tool_calls": message["tool_calls"],
+                                        "partial": False,
+                                        "timestamp": asyncio.get_event_loop().time(),
+                                    }
+                            elif "content" in parsed_data and parsed_data["content"]:
+                                # Handle direct content (not wrapped in message)
+                                content = parsed_data["content"]
+                                log.debug(f"[NVIDIA SSE] Direct content chunk: {content}")
                                 buffer += content
+                                full_response += content  # Accumulate immediately
+                                log.debug(
+                                    f"[NVIDIA SSE] Buffer size: {len(buffer)}, Full response size: {len(full_response)}"
+                                )
                                 chunk_count += 1
 
                                 # Intelligent chunking based on content analysis
@@ -229,22 +304,71 @@ class OptimizedOllamaClient:
                                         await stream_callback(chunk_data)
 
                                     yield chunk_data
-                                    full_response += buffer
-                                    buffer = ""
-                            elif "tool_calls" in message and message["tool_calls"]:
-                                # Handle tool calls
-                                yield {
-                                    "type": "tool_calls",
-                                    "tool_calls": message["tool_calls"],
-                                    "partial": False,
-                                    "timestamp": asyncio.get_event_loop().time(),
-                                }
+                                    log.debug(
+                                        f"[NVIDIA SSE] Yielded chunk {chunk_count}, cleared buffer"
+                                    )
+                                    buffer = ""  # Clear buffer after yielding
+                        except Exception as e:
+                            log.debug(f"Failed to parse streaming response line: {e}")
+                            continue
+                else:
+                    # Handle JSON lines format for Ollama
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
 
-                    except json.JSONDecodeError as e:
-                        log.debug(f"Failed to parse streaming response: {e}")
-                        continue
+                        try:
+                            data = json.loads(line)
+                            if "error" in data:
+                                yield {"type": "error", "error": data["error"]}
+                                return
 
-                # Yield final content if any remains
+                            if "message" in data:
+                                message = data["message"]
+
+                                # Handle content streaming
+                                if "content" in message and message["content"]:
+                                    content = message["content"]
+                                    buffer += content
+                                    full_response += content  # Accumulate immediately
+                                    chunk_count += 1
+
+                                    # Intelligent chunking based on content analysis
+                                    should_yield = self._should_yield_chunk(
+                                        buffer, chunk_count, content
+                                    )
+
+                                    if should_yield:
+                                        chunk_data = {
+                                            "type": "content",
+                                            "content": buffer,
+                                            "partial": True,
+                                            "chunk_id": chunk_count,
+                                            "timestamp": asyncio.get_event_loop().time(),
+                                        }
+
+                                        if stream_callback:
+                                            await stream_callback(chunk_data)
+
+                                        yield chunk_data
+                                        buffer = ""  # Clear buffer after yielding
+                                elif "tool_calls" in message and message["tool_calls"]:
+                                    # Handle tool calls
+                                    yield {
+                                        "type": "tool_calls",
+                                        "tool_calls": message["tool_calls"],
+                                        "partial": False,
+                                        "timestamp": asyncio.get_event_loop().time(),
+                                    }
+
+                        except json.JSONDecodeError as e:
+                            log.debug(f"Failed to parse streaming response: {e}")
+                            continue
+
+                # Yield final content if any remains in buffer
+                log.debug(
+                    f"[NVIDIA SSE] Stream ended, buffer size: {len(buffer) if buffer else 0}, full_response size: {len(full_response) if full_response else 0}"
+                )
                 if buffer:
                     final_chunk = {
                         "type": "content",
@@ -258,15 +382,187 @@ class OptimizedOllamaClient:
                         await stream_callback(final_chunk)
 
                     yield final_chunk
-                    full_response += buffer
+                    log.debug(f"[NVIDIA SSE] Yielded final chunk, size: {len(buffer)}")
+                    # full_response already contains buffer content from earlier accumulation
 
-                # Cache the full response if caching is enabled
-                if enable_caching:
-                    self._cache_response(cache_key, full_response)
-
+        except httpx.HTTPStatusError as e:
+            # Capture response body for HTTP errors
+            error_body = ""
+            try:
+                error_body = await e.response.aread()
+                error_body = error_body.decode("utf-8", errors="replace")[:500]
+            except:
+                pass
+            log.error(f"Streaming chat HTTP error: {e.response.status_code} - {error_body}")
+            yield {
+                "type": "error",
+                "error": f"HTTP {e.response.status_code}: {error_body or str(e)}",
+            }
         except Exception as e:
             log.error(f"Streaming chat error: {e}")
             yield {"type": "error", "error": str(e)}
+
+    def _prepare_nvidia_request(
+        self, messages: list, system: str, tools: list, context_window: int
+    ) -> dict:
+        """Prepare request for NVIDIA API"""
+        # Convert messages to NVIDIA format
+        nvidia_messages = []
+        if system:
+            nvidia_messages.append({"role": "system", "content": system})
+
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+
+            # Skip messages with no content and no tool_calls (except system/user/assistant)
+            if (
+                not content
+                and not msg.get("tool_calls")
+                and role not in ["system", "user", "assistant"]
+            ):
+                log.debug(f"[NVIDIA] Skipping message with role={role}, no content")
+                continue
+
+            # NVIDIA API expects slightly different format
+            nvidia_msg = {"role": role, "content": content if content else ""}
+
+            # Handle tool_calls (assistant messages)
+            if tool_calls := msg.get("tool_calls"):
+                nvidia_msg["tool_calls"] = tool_calls
+
+            # Handle tool result messages (role: "tool")
+            if role == "tool":
+                tool_call_id = msg.get("tool_call_id", "")
+                # Ensure content is a string
+                if not isinstance(content, str):
+                    import json
+
+                    content = json.dumps(content)
+                nvidia_msg["content"] = content
+                # Only add tool_call_id if it exists
+                if tool_call_id:
+                    nvidia_msg["tool_call_id"] = tool_call_id
+
+            nvidia_messages.append(nvidia_msg)
+
+        # Try different model identifiers if the simple one doesn't work
+        model_identifier = self.model
+        if "/" not in model_identifier and not model_identifier.startswith("moonshotai/"):
+            # For Kimi models, try with provider prefix
+            if "kimi" in model_identifier.lower():
+                model_to_use = f"moonshotai/{model_identifier}"
+            else:
+                model_to_use = model_identifier
+        else:
+            model_to_use = model_identifier
+
+        request_data = {
+            "model": model_to_use,
+            "messages": nvidia_messages,
+            "stream": True,
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "max_tokens": 1024,
+        }
+
+        if tools:
+            request_data["tools"] = tools
+
+        return request_data
+
+    def _prepare_ollama_request(
+        self, messages: list, system: str, tools: list, context_window: int
+    ) -> dict:
+        """Prepare request for Ollama API"""
+        request_data = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+            "options": {
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "top_k": 40,
+                "num_predict": -1,  # Unlimited
+                "stop": ["\n", "\n\n", ""],
+                "num_ctx": context_window or self.num_ctx,
+                "num_thread": -1,  # Use all available threads
+                "repeat_penalty": 1.1,
+                "repeat_last_n": 64,
+            },
+        }
+
+        if system:
+            request_data["system"] = system
+        if tools:
+            request_data["tools"] = tools
+
+        return request_data
+
+    def _parse_nvidia_response(self, data: dict) -> dict:
+        """Parse NVIDIA API response"""
+        if "error" in data:
+            return {"error": data["error"]}
+
+        if data.get("choices"):
+            choice = data["choices"][0]
+            delta = choice.get("delta", {})
+
+            # Handle tool calls in delta
+            if "tool_calls" in delta:
+                return {"message": {"role": "assistant", "tool_calls": delta["tool_calls"]}}
+
+            # Handle content in delta
+            if "content" in delta:
+                return {"message": {"role": "assistant", "content": delta["content"]}}
+
+            # Handle finish reason
+            if "finish_reason" in choice and choice["finish_reason"] == "tool_calls":
+                # Tool calls were made, but they might be in a different format
+                if "message" in choice and "tool_calls" in choice["message"]:
+                    return {
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": choice["message"]["tool_calls"],
+                        }
+                    }
+
+            # Default case - return whatever is in the delta
+            return {"message": {"role": "assistant", "content": delta.get("content", "")}}
+
+        # Handle direct content (not in choices)
+        if "content" in data:
+            return {"content": data["content"]}
+
+        return {}
+
+    def _parse_nvidia_sse_line(self, line: str) -> dict:
+        """Parse a single SSE line from NVIDIA API"""
+        if not line or line.startswith(":"):
+            return {}
+
+        log.debug(f"[NVIDIA SSE] Raw line: {line}")
+
+        if line.startswith("data: "):
+            data_str = line[6:]  # Remove "data: " prefix
+            if data_str.strip() == "[DONE]":
+                log.debug("[NVIDIA SSE] Stream done")
+                return {"done": True}
+
+            try:
+                data = json.loads(data_str)
+                log.debug(f"[NVIDIA SSE] Parsed data: {data}")
+                return self._parse_nvidia_response(data)
+            except json.JSONDecodeError as e:
+                log.debug(f"[NVIDIA SSE] Failed to parse JSON: {e}, data: {data_str}")
+                # Line might not be valid JSON, ignore
+                return {}
+
+        return {}
+
+    def _parse_ollama_response(self, data: dict) -> dict:
+        """Parse Ollama API response"""
+        return data
 
     def _should_yield_chunk(self, buffer: str, chunk_count: int, new_content: str) -> bool:
         """Intelligent chunking decision based on content analysis"""
@@ -276,13 +572,19 @@ class OptimizedOllamaClient:
         if new_content.endswith((".", "!", "?", ":", ";")):
             return True
 
-        # Yield based on buffer size with adaptive thresholds
-        if chunk_count < 3:  # Early chunks
-            return buffer_length >= 50
-        elif chunk_count < 10:  # Middle chunks
-            return buffer_length >= 100
-        else:  # Later chunks
-            return buffer_length >= 150
+        # Always yield if we have a substantial amount of content
+        if buffer_length >= 30:  # Reduced threshold
+            return True
+
+        # For very short responses, yield more frequently
+        if chunk_count < 3 and buffer_length >= 10:  # Lower threshold for early chunks
+            return True
+        elif chunk_count < 10 and buffer_length >= 20:  # Medium threshold for middle chunks
+            return True
+        elif buffer_length >= 30:  # Higher threshold for later chunks
+            return True
+
+        return False
 
     async def _optimize_context(self, messages: list, max_context: int = None) -> list:
         """Intelligent context optimization with summarization"""

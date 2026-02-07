@@ -10,10 +10,9 @@ This module extends the existing vector memory with:
 """
 
 import asyncio
-import json
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 from sentence_transformers import SentenceTransformer

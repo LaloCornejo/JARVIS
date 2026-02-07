@@ -9,13 +9,11 @@ This module provides intelligent UI/UX adaptation including:
 - Real-time UX optimization and accessibility features
 """
 
-import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
-import json
+from typing import Any, Dict, List, Optional, Set
 
 log = logging.getLogger(__name__)
 
