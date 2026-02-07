@@ -4,11 +4,12 @@ jarvis:
   timezone: "America/Mexico_City"  # Your local timezone
 
 llm:
-  backend: ollama
-  api_url: http://localhost:11434
-  primary_model: qwen3:1.7b
-  fast_model: qwen3:1.7b
-  fallback_model: qwen3:1.7b
+  backend: nvidia  # Changed default to nvidia
+  api_url: https://integrate.api.nvidia.com/v1  # NVIDIA API endpoint
+  api_key_env: NVIDIA_API_KEY  # Environment variable for API key
+  primary_model: moonshotai/kimi-k2.5  # Changed default to correct model name with provider prefix
+  fast_model: moonshotai/kimi-k2.5  # Changed default to correct model name with provider prefix
+  fallback_model: moonshotai/kimi-k2.5  # Changed default to correct model name with provider prefix
   temperature: 0.7
   stream: true
 
@@ -25,6 +26,22 @@ ollama:
   vision_model: huihui_ai/qwen3-vl-abliterated:8b-instruct
   fast_model: qwen3:1.7b
   preload: true
+
+nvidia:  # Added NVIDIA API configuration
+  api_url: https://integrate.api.nvidia.com/v1  # This is correct based on documentation
+  api_key_env: NVIDIA_API_KEY
+  default_model: moonshotai/kimi-k2.5  # Using the full model identifier with provider prefix
+  models:
+    - kimi-k2.5
+    - moonshotai/kimi-k2.5  # Try with the provider prefix
+    - moonshotai/kimi-k2-instruct
+    - llama3-chatqa-1.5
+    - mistral-large
+    - mixtral-8x7b-instruct
+    - llama3-70b-instruct
+    - llama3-8b-instruct
+    - cosmos-reason2-8b
+    - nemotron-3-nano-30b-a3b
 
 voice_input:
   stt_backend: faster-whisper

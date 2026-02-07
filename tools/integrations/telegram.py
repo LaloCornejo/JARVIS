@@ -158,13 +158,30 @@ class TelegramClient:
     async def send_document(
         self,
         chat_id: str | int,
-        document_path: str,
+        document_path: str | None = None,
+        document_data: bytes | None = None,
+        filename: str = "document.pdf",
         caption: str | None = None,
     ) -> dict[str, Any] | None:
         """Send a document/file to a chat."""
         try:
-            with open(document_path, "rb") as f:
-                files = {"document": (os.path.basename(document_path), f)}
+            # Handle both file path and file data cases
+            if document_data is not None:
+                # Send from memory
+                import io
+
+                file_obj = io.BytesIO(document_data)
+                file_obj.seek(0)
+                files = {"document": (filename, file_obj)}
+            elif document_path is not None:
+                # Send from file path
+                file_obj = open(document_path, "rb")
+                files = {"document": (os.path.basename(document_path), file_obj)}
+            else:
+                log.error("Either document_path or document_data must be provided")
+                return None
+
+            try:
                 data = {"chat_id": str(chat_id)}
                 if caption:
                     data["caption"] = caption
@@ -179,6 +196,119 @@ class TelegramClient:
                         return result.get("result")
                 log.warning(f"Failed to send document: {response.status_code}")
                 return None
+            finally:
+                # Close the file object if it was opened from a path
+                if document_path is not None and hasattr(file_obj, "close"):
+                    file_obj.close()
+        except FileNotFoundError:
+            log.error(f"Document file not found: {document_path}")
+            return None
+        except Exception as e:
+            log.error(f"Error sending document: {e}")
+            return None
+
+    async def send_voice(
+        self,
+        chat_id: str | int,
+        voice_data: bytes | None = None,
+        voice_path: str | None = None,
+        filename: str = "voice.ogg",
+        caption: str | None = None,
+        duration: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Send a voice message to a chat."""
+        try:
+            # Handle both file path and file data cases
+            if voice_data is not None:
+                # Send from memory
+                import io
+
+                file_obj = io.BytesIO(voice_data)
+                file_obj.seek(0)
+                files = {"voice": (filename, file_obj)}
+            elif voice_path is not None:
+                # Send from file path
+                file_obj = open(voice_path, "rb")
+                files = {"voice": (os.path.basename(voice_path), file_obj)}
+            else:
+                log.error("Either voice_path or voice_data must be provided")
+                return None
+
+            try:
+                data = {"chat_id": str(chat_id)}
+                if caption:
+                    data["caption"] = caption
+                if duration:
+                    data["duration"] = duration
+
+                client = await self._get_client()
+                url = self._get_url("sendVoice")
+                response = await client.post(url, data=data, files=files)
+
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("ok"):
+                        return result.get("result")
+                log.warning(f"Failed to send voice: {response.status_code}")
+                return None
+            finally:
+                # Close the file object if it was opened from a path
+                if voice_path is not None and hasattr(file_obj, "close"):
+                    file_obj.close()
+        except FileNotFoundError:
+            log.error(f"Voice file not found: {voice_path}")
+            return None
+        except Exception as e:
+            log.error(f"Error sending voice: {e}")
+            return None
+
+            try:
+                data = {"chat_id": str(chat_id)}
+                if caption:
+                    data["caption"] = caption
+                if duration:
+                    data["duration"] = duration
+
+                client = await self._get_client()
+                url = self._get_url("sendVoice")
+                response = await client.post(url, data=data, files=files)
+
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("ok"):
+                        return result.get("result")
+                log.warning(f"Failed to send voice: {response.status_code}")
+                return None
+            finally:
+                # Close the file object if it was opened from a path
+                if voice_path is not None and file_obj:
+                    file_obj.close()
+        except FileNotFoundError:
+            log.error(f"Voice file not found: {voice_path}")
+            return None
+        except Exception as e:
+            log.error(f"Error sending voice: {e}")
+            return None
+
+            try:
+                data = {"chat_id": str(chat_id)}
+                if caption:
+                    data["caption"] = caption
+
+                client = await self._get_client()
+                url = self._get_url("sendDocument")
+                response = await client.post(url, data=data, files=files)
+
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("ok"):
+                        return result.get("result")
+                log.warning(f"Failed to send document: {response.status_code}")
+                return None
+            finally:
+                # Close the file object if it was opened from a path
+                if document_path is not None and file_obj:
+                    file_obj.close()
         except FileNotFoundError:
             log.error(f"Document file not found: {document_path}")
             return None

@@ -316,8 +316,40 @@ class TelegramBotHandler:
                 # Add assistant response to session
                 session.add_message("assistant", full_response)
 
-                # Send response to Telegram (split if too long)
-                await self._send_long_message(chat_id, full_response)
+                # Check if TTS service is available using the same health check as server
+                tts_available = False
+                if hasattr(self.jarvis, "tts") and self.jarvis.tts:
+                    try:
+                        tts_available = await self.jarvis.tts.health_check()
+                        if tts_available:
+                            log.info("[TELEGRAM] TTS service is available")
+                        else:
+                            log.debug("[TELEGRAM] TTS service is not available")
+                    except Exception as e:
+                        log.warning(f"[TELEGRAM] TTS health check failed: {e}")
+                        tts_available = False
+
+                if tts_available:
+                    # Generate audio from response
+                    try:
+                        log.info("[TELEGRAM] Generating TTS audio...")
+                        audio_data = await self.jarvis.tts.speak_to_audio(full_response)
+
+                        # Send audio message to Telegram
+                        await self._send_audio_message(
+                            chat_id,
+                            audio_data,
+                            filename="response.mp3",
+                            text_content=full_response,  # Include text as well
+                        )
+                        log.info("[TELEGRAM] Audio message sent successfully")
+                    except Exception as e:
+                        log.error(f"[TELEGRAM] Error generating/sending TTS: {e}")
+                        # Fallback to text message
+                        await self._send_long_message(chat_id, full_response)
+                else:
+                    # Send text response
+                    await self._send_long_message(chat_id, full_response)
             else:
                 await self._send_message(chat_id, "🤔 I didn't get a response. Please try again.")
 
@@ -363,6 +395,38 @@ class TelegramBotHandler:
             await self._send_message(chat_id, prefix + chunk)
             if i < len(chunks):
                 await asyncio.sleep(0.5)  # Small delay between chunks
+
+    async def _send_audio_message(
+        self,
+        chat_id: int | str,
+        audio_data: bytes,
+        filename: str = "response.mp3",
+        text_content: str | None = None,
+    ) -> None:
+        """Send an audio message to Telegram with optional text content."""
+        try:
+            # Send the audio file using the Telegram client directly from memory
+            result = await self.client.send_document(
+                chat_id=chat_id,
+                document_data=audio_data,
+                filename=filename,
+                caption=text_content[:1024]
+                if text_content
+                else None,  # Telegram caption limit is 1024 chars
+            )
+
+            if result:
+                log.info(f"[TELEGRAM] Audio message sent successfully to chat {chat_id}")
+            else:
+                log.error("[TELEGRAM] Failed to send audio message")
+                # Fallback to text message
+                if text_content:
+                    await self._send_long_message(chat_id, text_content)
+        except Exception as e:
+            log.error(f"[TELEGRAM] Error sending audio message: {e}")
+            # Fallback to text message
+            if text_content:
+                await self._send_long_message(chat_id, text_content)
 
     def _get_or_create_session(
         self,

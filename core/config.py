@@ -31,18 +31,54 @@ class Config:
 
     @property
     def llm_url(self) -> str:
-        return self.get("llm.api_url", "http://localhost:11434")
+        backend = self.get("llm.backend", "nvidia")  # Changed default to nvidia
+        if backend == "nvidia":
+            return self.get("nvidia.api_url", "https://integrate.api.nvidia.com/v1")
+        elif backend == "ollama":
+            return self.get("ollama.api_url", "http://localhost:11434")
+        else:
+            return self.get("llm.api_url", "https://integrate.api.nvidia.com/v1")
 
     @property
     def llm_model(self) -> str:
-        return self.get("llm.primary_model", "qwen3:1.7b")
+        backend = self.get("llm.backend", "nvidia")  # Changed default to nvidia
+        if backend == "nvidia":
+            return self.get(
+                "llm.primary_model", "moonshotai/kimi-k2.5"
+            )  # Changed default to correct model name
+        elif backend == "ollama":
+            return self.get("llm.primary_model", "qwen3:1.7b")
+        else:
+            return self.get(
+                "llm.primary_model", "moonshotai/kimi-k2.5"
+            )  # Changed default to correct model name
 
     @property
     def llm_vision_model(self) -> str:
-        return self.get("llm.vision_model", "huihui_ai/qwen3-vl-abliterated:8b-instruct ")
+        backend = self.get("llm.backend", "nvidia")  # Changed default to nvidia
+        if backend == "nvidia":
+            return self.get(
+                "llm.vision_model", "moonshotai/kimi-k2.5"
+            )  # Changed default to correct model name
+        elif backend == "ollama":
+            return self.get("llm.vision_model", "huihui_ai/qwen3-vl-abliterated:8b-instruct ")
+        else:
+            return self.get(
+                "llm.vision_model", "moonshotai/kimi-k2.5"
+            )  # Changed default to correct model name
 
     def llm_fast_model(self) -> str:
-        return self.get("llm.fast_model", "qwen3:1.7b")
+        backend = self.get("llm.backend", "nvidia")  # Changed default to nvidia
+        if backend == "nvidia":
+            return self.get(
+                "llm.fast_model", "moonshotai/kimi-k2.5"
+            )  # Changed default to correct model name
+        elif backend == "ollama":
+            return self.get("llm.fast_model", "qwen3:1.7b")
+        else:
+            return self.get(
+                "llm.fast_model", "moonshotai/kimi-k2.5"
+            )  # Changed default to correct model name
 
     @property
     def tts_base_url(self) -> str:
@@ -79,65 +115,3 @@ class Config:
     @property
     def llm_temperature(self) -> float:
         return self.get("llm.temperature", 0.7)
-
-    @property
-    def llm_stream(self) -> bool:
-        return self.get("llm.stream", True)
-
-    @property
-    def llm_fallback_model(self) -> str:
-        return self.get("llm.fallback_model", "qwen3:1.7b")
-
-    @property
-    def llm_backend(self) -> str:
-        return self.get("llm.backend", "ollama")
-
-    @property
-    def gemini_model(self) -> str:
-        return self.get("gemini.default_model", "gemini-2.5-flash")
-
-    @property
-    def gemini_models(self) -> list[str]:
-        return self.get("gemini.models", ["gemini-2.5-flash"])
-
-    @property
-    def ollama_url(self) -> str:
-        return self.get("ollama.api_url", "http://localhost:11434")
-
-    @property
-    def copilot_model(self) -> str:
-        primary = self.get("llm.primary_model", "claude-sonnet-4.5")
-        if primary.startswith("copilot/"):
-            return primary.split("/", 1)[1]
-        return "claude-sonnet-4.5"
-
-    @property
-    def telegram_bot_token(self) -> str | None:
-        import os
-
-        return os.environ.get("TELEGRAM_BOT_TOKEN") or self.get("telegram.bot_token")
-
-    @property
-    def telegram_allowed_chat_ids(self) -> list[int | str] | None:
-        """Get list of allowed Telegram chat IDs for security.
-
-        Returns None if all chats are allowed (no whitelist).
-        Configure in settings.yaml or TELEGRAM_ALLOWED_CHAT_IDS env var.
-        """
-        import os
-
-        env_ids = os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "")
-        if env_ids:
-            # Parse comma-separated IDs
-            return [id.strip() for id in env_ids.split(",") if id.strip()]
-
-        config_ids = self.get("telegram.allowed_chat_ids", [])
-        if config_ids:
-            return config_ids
-
-        return None  # No whitelist = allow all
-
-    @property
-    def timezone(self) -> str:
-        """Get the configured timezone."""
-        return self.get("jarvis.timezone", "America/Mexico_City")

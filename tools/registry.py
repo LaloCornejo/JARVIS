@@ -107,6 +107,12 @@ from tools.integrations import (
     TelegramSendDocumentTool,
     TelegramSendMessageTool,
     TelegramSendPhotoTool,
+    WhatsAppDownloadMediaTool,
+    WhatsAppGetBusinessProfileTool,
+    WhatsAppGetTemplatesTool,
+    WhatsAppSendMediaTool,
+    WhatsAppSendMessageTool,
+    WhatsAppSendTemplateTool,
 )
 from tools.memory import (
     ForgetMemoryTool,
@@ -550,6 +556,25 @@ TOOL_CATEGORIES = {
             "alert",
         ],
     },
+    "whatsapp": {
+        "tools": [
+            "whatsapp_send_message",
+            "whatsapp_send_template",
+            "whatsapp_send_media",
+            "whatsapp_get_templates",
+            "whatsapp_get_profile",
+            "whatsapp_download_media",
+        ],
+        "keywords": [
+            "whatsapp",
+            "wa",
+            "message",
+            "send whatsapp",
+            "whatsapp message",
+            "whatsapp media",
+            "whatsapp template",
+        ],
+    },
 }
 
 CORE_TOOLS = ["get_current_time", "web_search", "run_command", "list_open_apps", "launch_app"]
@@ -655,6 +680,12 @@ class ToolRegistry:
             TelegramEditMessageTool(),
             TelegramDeleteMessageTool(),
             TelegramPinMessageTool(),
+            WhatsAppSendMessageTool(),
+            WhatsAppSendTemplateTool(),
+            WhatsAppSendMediaTool(),
+            WhatsAppGetTemplatesTool(),
+            WhatsAppGetBusinessProfileTool(),
+            WhatsAppDownloadMediaTool(),
             GitHubListReposTool(),
             GitHubListIssuesTool(),
             GitHubCreateIssueTool(),

@@ -3,11 +3,12 @@
 import asyncio
 import json
 import logging
+import os
 from typing import Any, Dict, List
 
 from core.cache import intent_cache, should_cache_response
 from core.config import Config
-from core.llm import OllamaClient
+from core.llm.optimized_client import OptimizedLLMClient
 from core.performance_monitor import performance_monitor
 from core.streaming_interface import conversation_buffer, streaming_interface
 from core.voice.tts import TextToSpeech
@@ -33,7 +34,23 @@ JARVIS doesn’t hold back — and neither should you."""
 class JarvisServer:
     def __init__(self):
         self.config = Config("config/settings.yaml")
-        self.ollama = OllamaClient(model=self.config.llm_model)
+        # Determine which config section to use based on backend
+        backend = self.config.get("llm.backend", "nvidia")
+        if backend == "nvidia":
+            model = self.config.get("nvidia.default_model", "moonshotai/kimi-k2.5")
+            base_url = self.config.get("nvidia.api_url", "https://integrate.api.nvidia.com/v1")
+            api_key_env = self.config.get("nvidia.api_key_env", "NVIDIA_API_KEY")
+        else:
+            model = self.config.llm_model
+            base_url = self.config.llm_url
+            api_key_env = self.config.get("nvidia.api_key_env", "NVIDIA_API_KEY")
+
+        self.ollama = OptimizedLLMClient(
+            backend=backend,
+            base_url=base_url,
+            api_key=os.environ.get(api_key_env),
+            model=model,
+        )
         self.tools = get_tool_registry()
         self.tts = TextToSpeech()
         self.messages: List[Dict[str, Any]] = []
@@ -98,15 +115,11 @@ class JarvisServer:
         start_time = asyncio.get_event_loop().time()
         chunk_count = 0
 
-        async for chunk in client.chat(
-            messages=self.messages, system=SYSTEM_PROMPT, tools=schemas
-        ):
+        async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT, tools=schemas):
             chunk_count += 1
             if msg := chunk.get("message", {}):
                 if content := msg.get("content"):
-                    log.warning(
-                        f"[SERVER] Got content chunk {chunk_count}: {len(content)} chars"
-                    )
+                    log.warning(f"[SERVER] Got content chunk {chunk_count}: {len(content)} chars")
                     full_response += content
                     if broadcast_func:
                         await broadcast_func({"type": "streaming_chunk", "content": content})
@@ -118,6 +131,14 @@ class JarvisServer:
                         f"[SERVER] Tool calls in chunk {chunk_count}: {len(calls)} calls, "
                         f"total unique: {len(tool_calls)}"
                     )
+            # Handle direct content chunks (not wrapped in message)
+            elif content := chunk.get("content"):
+                log.warning(
+                    f"[SERVER] Got direct content chunk {chunk_count}: {len(content)} chars"
+                )
+                full_response += content
+                if broadcast_func:
+                    await broadcast_func({"type": "streaming_chunk", "content": content})
 
         log.warning(
             f"[SERVER] Chat stream ended after {chunk_count} chunks, "
@@ -145,6 +166,7 @@ class JarvisServer:
                 }
             )
 
+            log.debug(f"[SERVER] Processing {len(tool_calls)} tool calls")
             tool_results = await self.process_tool_calls(tool_calls)
             log.warning(f"[SERVER] Tool results received: {len(tool_results)} results")
             for i, tr in enumerate(tool_results):
@@ -171,14 +193,10 @@ class JarvisServer:
                     is_vision_tool = False
 
             if not is_vision_tool:
-                log.warning(
-                    f"[SERVER] Starting second LLM pass with {len(self.messages)} messages"
-                )
+                log.warning(f"[SERVER] Starting second LLM pass with {len(self.messages)} messages")
                 full_response = ""
                 second_pass_chunks = 0
-                async for chunk in client.chat(
-                    messages=self.messages, system=SYSTEM_PROMPT
-                ):
+                async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT):
                     second_pass_chunks += 1
                     if msg := chunk.get("message", {}):
                         if content := msg.get("content"):
@@ -191,12 +209,28 @@ class JarvisServer:
                                 await broadcast_func(
                                     {"type": "streaming_chunk", "content": content}
                                 )
+                        elif calls := msg.get("tool_calls"):
+                            log.warning(
+                                f"[SERVER] Unexpected tool calls in second pass: {len(calls)}"
+                            )
+                    elif content := chunk.get("content"):
+                        # Handle direct content chunks (not wrapped in message)
+                        log.info(
+                            f"[SERVER] Second pass direct chunk {second_pass_chunks}: "
+                            f"{len(content)} chars"
+                        )
+                        full_response += content
+                        if broadcast_func:
+                            await broadcast_func({"type": "streaming_chunk", "content": content})
+                    elif tool_result := chunk.get("tool_calls"):
+                        log.warning(f"[SERVER] Tool result in chunk: {tool_result}")
+                log.warning(
+                    f"[SERVER] Second pass completed with {len(full_response)} chars response"
+                )
 
         self.messages.append({"role": "assistant", "content": full_response})
         await streaming_interface.push_assistant_message(full_response)
-        await conversation_buffer.add_message(
-            {"role": "assistant", "content": full_response}
-        )
+        await conversation_buffer.add_message({"role": "assistant", "content": full_response})
 
         if broadcast_func:
             await broadcast_func({"type": "message_complete", "full_response": full_response})
@@ -232,18 +266,26 @@ class JarvisServer:
             if isinstance(args, str):
                 args = json.loads(args) if args.strip() else {}
             log.warning(f"[SERVER] Executing tool: {name} with args: {args}")
-            result = await self.tools.execute(name, **args)
-            log.warning(
-                f"[SERVER] Tool {name} result: success={result.success}, "
-                f"data_len={len(str(result.data)) if result.data else 0}, error={result.error}"
-            )
-            return {
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "content": json.dumps(
-                    result.data if result.success else {"error": result.error}
-                ),
-            }
+            try:
+                result = await self.tools.execute(name, **args)
+                log.warning(
+                    f"[SERVER] Tool {name} result: success={result.success}, "
+                    f"data_len={len(str(result.data)) if result.data else 0}, error={result.error}"
+                )
+                content = json.dumps(result.data if result.success else {"error": result.error})
+                log.debug(f"[SERVER] Tool {name} content length: {len(content)}")
+                return {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": content,
+                }
+            except Exception as e:
+                log.error(f"[SERVER] Tool {name} execution failed: {e}", exc_info=True)
+                return {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": json.dumps({"error": f"Execution failed: {str(e)}"}),
+                }
 
         # Execute tools in parallel
         results = await asyncio.gather(
