@@ -4,6 +4,7 @@ Automation module for JARVIS.
 Provides workflow automation, triggers, and templates.
 """
 
+from core.automation.templates import WorkflowRecipe, WorkflowTemplateLibrary, get_template_library
 from core.automation.triggers import (
     CompositeTrigger,
     ConditionTrigger,
@@ -16,7 +17,6 @@ from core.automation.triggers import (
     TriggerType,
     get_trigger_manager,
 )
-from core.automation.templates import WorkflowRecipe, WorkflowTemplateLibrary, get_template_library
 from core.automation.workflow_orchestrator import (
     TaskStatus,
     WorkflowExecution,

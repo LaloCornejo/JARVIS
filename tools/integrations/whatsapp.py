@@ -24,11 +24,9 @@ This implementation uses the official Cloud API which requires a Meta business a
 
 from __future__ import annotations
 
-import json
 import logging
 import mimetypes
 import os
-from datetime import datetime
 from typing import Any
 
 import httpx

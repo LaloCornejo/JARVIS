@@ -30,23 +30,20 @@ via WebSocket protocol, handle authentication, and manage the WhatsApp Web proto
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
-import time
-import base64
-import threading
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 # Try to import required packages
 try:
-    import socketio
-    import qrcode
-    from PIL import Image
     import io
+
+    import qrcode
+    import socketio
+    from PIL import Image
 
     WHATSAPP_DEPS_AVAILABLE = True
 except ImportError:

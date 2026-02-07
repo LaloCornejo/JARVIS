@@ -8,15 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
-import json
 import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from enum import Enum, auto
+from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional
 
 log = logging.getLogger(__name__)
 

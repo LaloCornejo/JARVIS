@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from tools.base import BaseTool, ToolResult
 from core.mcp.manager import get_mcp_manager
+from tools.base import BaseTool, ToolResult
 
 log = logging.getLogger("jarvis.mcp.bridge")
 

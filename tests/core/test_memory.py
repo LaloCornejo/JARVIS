@@ -2,15 +2,13 @@
 
 import pytest
 
-from core.memory.episodic import EpisodicMemory, Episode, EpisodeType
+from core.memory.episodic import EpisodicMemory
 from core.memory.knowledge_graph import (
-    Entity,
     EntityType,
     KnowledgeGraph,
     RelationType,
-    Relationship,
 )
-from core.memory.procedural import ProceduralMemory, Procedure, Skill, SkillLevel
+from core.memory.procedural import ProceduralMemory, SkillLevel
 
 
 class TestEpisodicMemory:

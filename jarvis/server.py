@@ -124,13 +124,31 @@ class JarvisServer:
                     if broadcast_func:
                         await broadcast_func({"type": "streaming_chunk", "content": content})
                 if calls := msg.get("tool_calls"):
-                    for call in calls:
+                    valid_calls = [
+                        c for c in calls if c.get("id") and c.get("function", {}).get("name")
+                    ]
+                    for call in valid_calls:
                         if call.get("id") not in [tc.get("id") for tc in tool_calls]:
                             tool_calls.append(call)
-                    log.warning(
-                        f"[SERVER] Tool calls in chunk {chunk_count}: {len(calls)} calls, "
-                        f"total unique: {len(tool_calls)}"
-                    )
+                log.warning(
+                    f"[SERVER] Tool calls in chunk {chunk_count}: "
+                    f"{len(valid_calls)} valid calls, "
+                    f"total unique: {len(tool_calls)}"
+                )
+            # Handle tool_calls directly from optimized_client (type: "tool_calls")
+            elif chunk.get("type") == "tool_calls" and chunk.get("tool_calls"):
+                calls = chunk["tool_calls"]
+                valid_calls = [
+                    c for c in calls if c.get("id") and c.get("function", {}).get("name")
+                ]
+                for call in valid_calls:
+                    if call.get("id") not in [tc.get("id") for tc in tool_calls]:
+                        tool_calls.append(call)
+                log.warning(
+                    f"[SERVER] Tool calls received (type: tool_calls): "
+                    f"{len(valid_calls)} valid calls, "
+                    f"total unique: {len(tool_calls)}"
+                )
             # Handle direct content chunks (not wrapped in message)
             elif content := chunk.get("content"):
                 log.warning(
@@ -261,10 +279,53 @@ class JarvisServer:
         async def execute_single_tool(call: dict) -> dict:
             fn = call.get("function", {})
             name = fn.get("name", "")
-            args = fn.get("arguments", {})
+            args = fn.get("arguments") or {}
             tool_call_id = call.get("id", "")
+
+            # Skip invalid tool calls
+            if not name:
+                log.warning("[SERVER] Skipping tool call with no name")
+                return {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id or "unknown",
+                    "content": json.dumps({"error": "Tool call has no name"}),
+                }
+
             if isinstance(args, str):
-                args = json.loads(args) if args.strip() else {}
+                try:
+                    args = json.loads(args) if args.strip() else {}
+                except json.JSONDecodeError as e:
+                    log.warning(
+                        f"[SERVER] Failed to parse tool arguments JSON: {e}, args: {repr(args)}"
+                    )
+                    # Try to fix common LLM JSON errors
+                    try:
+                        fixed_args = args.strip()
+                        # Remove surrounding single quotes if present
+                        if fixed_args.startswith("'") and fixed_args.endswith("'"):
+                            fixed_args = fixed_args[1:-1]
+                        # Try wrapping bare values in an object based on tool name
+                        if name == "launch_app" and not fixed_args.startswith("{"):
+                            fixed_args = f'{{"app_name": {json.dumps(fixed_args)}}}'
+                        elif name == "web_search" and not fixed_args.startswith("{"):
+                            fixed_args = f'{{"query": {json.dumps(fixed_args)}}}'
+                        elif name == "open_url" and not fixed_args.startswith("{"):
+                            fixed_args = f'{{"url": {json.dumps(fixed_args)}}}'
+                        elif not fixed_args.startswith("{"):
+                            # Generic fallback - assume it's a single string argument
+                            fixed_args = f'{{"value": {json.dumps(fixed_args)}}}'
+                        args = json.loads(fixed_args)
+                        log.warning(f"[SERVER] Recovered args after fix: {args}")
+                    except Exception as fix_error:
+                        log.error(f"[SERVER] Could not fix malformed args: {fix_error}")
+                        args = {}
+            # Ensure args is a dict, not None
+            if args is None:
+                args = {}
+            # Ensure args is a dict, not None
+            if args is None:
+                args = {}
+
             log.warning(f"[SERVER] Executing tool: {name} with args: {args}")
             try:
                 result = await self.tools.execute(name, **args)
@@ -287,9 +348,20 @@ class JarvisServer:
                     "content": json.dumps({"error": f"Execution failed: {str(e)}"}),
                 }
 
+        # Filter out invalid tool calls before executing
+        valid_tool_calls = [
+            call for call in tool_calls if call.get("function", {}).get("name") and call.get("id")
+        ]
+
+        if len(valid_tool_calls) != len(tool_calls):
+            log.warning(
+                f"[SERVER] Filtered out "
+                f"{len(tool_calls) - len(valid_tool_calls)} invalid tool calls"
+            )
+
         # Execute tools in parallel
         results = await asyncio.gather(
-            *[execute_single_tool(call) for call in tool_calls], return_exceptions=True
+            *[execute_single_tool(call) for call in valid_tool_calls], return_exceptions=True
         )
         # Filter out exceptions and handle them
         valid_results = []

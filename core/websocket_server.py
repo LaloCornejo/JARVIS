@@ -1,25 +1,25 @@
 """WebSocket server for JARVIS TUI client communication"""
 
+import asyncio
 import json
 import logging
 import sys
-import asyncio
-from typing import Dict, Set
+from typing import Set
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from rich.console import Console
 from rich.logging import RichHandler
 
-from jarvis.server import JarvisServer
-from core.telegram_bot import telegram_bot_handler
 from core.discord_bot import discord_bot_handler
+from core.telegram_bot import telegram_bot_handler
 from core.whatsapp_bot import whatsapp_bot_handler
+from jarvis.server import JarvisServer
 
 log = logging.getLogger("jarvis.websocket")
 

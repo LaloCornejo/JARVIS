@@ -16,17 +16,16 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from jarvis.server import JarvisServer
 
-from tools.integrations.telegram import TelegramClient, get_telegram_client
+from tools.integrations.telegram import get_telegram_client
 
 log = logging.getLogger(__name__)
 

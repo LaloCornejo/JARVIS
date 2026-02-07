@@ -6,13 +6,12 @@ Provides pre-built workflow templates and IFTTT-style automation recipes.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from core.automation.workflow_orchestrator import WorkflowTask, WorkflowTemplate
+from core.automation.workflow_orchestrator import WorkflowTemplate
 
 log = logging.getLogger(__name__)
 

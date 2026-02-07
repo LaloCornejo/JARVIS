@@ -28,7 +28,7 @@ import os
 import zlib
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
 import websockets
@@ -570,9 +570,9 @@ class DiscordBotHandler:
                     log.error(f"[DISCORD] Error in capture_broadcast: {e}", exc_info=True)
 
             log.info(f"[DISCORD] Sending message to JARVIS: {text[:100]}...")
-            log.debug(f"[DISCORD] Starting process_message call")
+            log.debug("[DISCORD] Starting process_message call")
             await self.jarvis.process_message(text, broadcast_func=capture_broadcast)
-            log.debug(f"[DISCORD] Finished process_message call")
+            log.debug("[DISCORD] Finished process_message call")
             log.debug(
                 f"[DISCORD] Response chunks: {len(response_chunks)}, Full response: {len(full_response) if full_response else 0} chars"
             )

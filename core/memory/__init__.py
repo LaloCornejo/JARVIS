@@ -34,14 +34,14 @@ from core.memory.knowledge_graph import (
     InferenceRule,
     KnowledgeGraph,
     QueryResult,
-    RelationType,
     Relationship,
+    RelationType,
     get_knowledge_graph,
 )
 from core.memory.procedural import (
     ExecutionResult,
-    Procedure,
     ProceduralMemory,
+    Procedure,
     Skill,
     SkillLevel,
     Step,

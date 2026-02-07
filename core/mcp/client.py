@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import subprocess
 from contextlib import AsyncExitStack
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult
 
 log = logging.getLogger("jarvis.mcp.client")
 

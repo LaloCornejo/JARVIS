@@ -6,7 +6,6 @@ import pytest
 
 from core.prediction.anomaly_detector import (
     AnomalyDetector,
-    AnomalySeverity,
     AnomalyType,
 )
 from core.prediction.pattern_analyzer import PatternAnalyzer

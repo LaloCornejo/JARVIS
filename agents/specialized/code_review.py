@@ -11,15 +11,14 @@ This agent provides:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
-from agents.base import AgentContext, AgentMessage, AgentRole, BaseAgent
+from agents.base import AgentContext, AgentRole, BaseAgent
 from core.llm import OllamaClient
 
 log = logging.getLogger(__name__)

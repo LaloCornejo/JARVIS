@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from core.mcp.client import MCPClient
 from core.config import Config
+from core.mcp.client import MCPClient
 
 log = logging.getLogger("jarvis.mcp.manager")
 

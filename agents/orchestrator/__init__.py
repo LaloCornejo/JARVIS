@@ -14,8 +14,14 @@ from agents.base import AgentContext, AgentMessage, AgentRole, BaseAgent
 from agents.specialized import CodeReviewAgent, CreativeAgent, PlanningAgent, ResearchAgent
 from agents.specialized.legacy import (
     LegacyCodeAgent as CodeAgent,
+)
+from agents.specialized.legacy import (
     LegacyMemoryAgent as MemoryAgent,
+)
+from agents.specialized.legacy import (
     LegacyResearchAgent as _LegacyResearchAgent,
+)
+from agents.specialized.legacy import (
     LegacyTaskAgent as TaskAgent,
 )
 from core.llm import OllamaClient

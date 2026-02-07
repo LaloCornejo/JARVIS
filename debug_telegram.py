@@ -7,8 +7,8 @@ Or test the full handler:
     python debug_telegram.py --test-handler
 """
 
-import asyncio
 import argparse
+import asyncio
 import os
 import sys
 
@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 env_loaded = load_dotenv()
 print(f".env file loaded: {env_loaded}")
 
-from tools.integrations.telegram import get_telegram_client, TelegramClient
+from tools.integrations.telegram import get_telegram_client
 
 
 async def test_basic_connection():
@@ -67,7 +67,7 @@ async def test_basic_connection():
     try:
         bot_info = await client.get_me()
         if bot_info:
-            print(f"   ✓ Connected successfully!")
+            print("   ✓ Connected successfully!")
             print(f"     Bot ID: {bot_info.get('id')}")
             print(f"     Bot Name: {bot_info.get('first_name')}")
             print(f"     Bot Username: @{bot_info.get('username')}")
@@ -201,7 +201,7 @@ async def send_test_message():
     try:
         result = await client.send_message(chat_id=chat_id, text=message)
         if result:
-            print(f"✓ Message sent!")
+            print("✓ Message sent!")
             print(f"  Message ID: {result.get('message_id')}")
             print(f"  Date: {result.get('date')}")
         else:

@@ -6,12 +6,10 @@ and adaptive chunking for optimal streaming performance.
 """
 
 import asyncio
-import hashlib
 import logging
 import re
 from collections import defaultdict, deque
 from typing import Any, AsyncIterator, Dict, List, Optional
-
 
 log = logging.getLogger(__name__)
 

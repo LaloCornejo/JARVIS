@@ -12,6 +12,19 @@ from rich.console import Console
 from core.cache import tool_cache
 from tools.base import BaseTool, ToolResult
 from tools.code import ExecutePythonTool, ExecuteShellTool
+from tools.enhanced import (
+    AgentExecuteTool,
+    CheckAnomaliesTool,
+    CreateUserTool,
+    CreateWorkflowTool,
+    GetConversationHistoryTool,
+    GetSuggestionsTool,
+    GetUserStatsTool,
+    GetUsersTool,
+    ListAgentsTool,
+    ListWorkflowsTool,
+    RecallEpisodicMemoryTool,
+)
 from tools.files import (
     FileInfoTool,
     ListDirectoryTool,
@@ -86,18 +99,6 @@ from tools.integrations import (
     SpotifyPreviousTool,
     SpotifySearchTool,
     SpotifyVolumeTool,
-    VLCNextTool,
-    VLCPauseTool,
-    VLCPlayTool,
-    VLCPreviousTool,
-    VLCStatusTool,
-    VLCStopTool,
-    VLCVolumeTool,
-    YouTubeInfoTool,
-    YouTubePlayTool,
-    YouTubeSearchTool,
-)
-from tools.integrations import (
     TelegramDeleteMessageTool,
     TelegramEditMessageTool,
     TelegramGetBotInfoTool,
@@ -107,12 +108,22 @@ from tools.integrations import (
     TelegramSendDocumentTool,
     TelegramSendMessageTool,
     TelegramSendPhotoTool,
+    VLCNextTool,
+    VLCPauseTool,
+    VLCPlayTool,
+    VLCPreviousTool,
+    VLCStatusTool,
+    VLCStopTool,
+    VLCVolumeTool,
     WhatsAppDownloadMediaTool,
     WhatsAppGetBusinessProfileTool,
     WhatsAppGetTemplatesTool,
     WhatsAppSendMediaTool,
     WhatsAppSendMessageTool,
     WhatsAppSendTemplateTool,
+    YouTubeInfoTool,
+    YouTubePlayTool,
+    YouTubeSearchTool,
 )
 from tools.memory import (
     ForgetMemoryTool,
@@ -124,19 +135,6 @@ from tools.rust_performance_tools import (
     RustDataExtractorTool,
     RustFileSearchTool,
     RustLineCountTool,
-)
-from tools.enhanced import (
-    AgentExecuteTool,
-    CheckAnomaliesTool,
-    CreateUserTool,
-    CreateWorkflowTool,
-    GetConversationHistoryTool,
-    GetSuggestionsTool,
-    GetUserStatsTool,
-    GetUsersTool,
-    ListAgentsTool,
-    ListWorkflowsTool,
-    RecallEpisodicMemoryTool,
 )
 from tools.system import (
     GetCurrentTimeTool,
@@ -765,6 +763,9 @@ class ToolRegistry:
         return [tool.to_schema() for tool in self._tools.values()]
 
     async def _execute_rust_tool(self, name: str, **kwargs: Any) -> ToolResult:
+        """Execute a Rust tool with fallback to Python implementation."""
+        from pathlib import Path
+
         # Import streaming interface
         from core.streaming_interface import streaming_interface
 
@@ -781,7 +782,7 @@ class ToolRegistry:
             "run_command": "red",
             "execute_python": "red",
         }
-        bg_color = color_map.get(name, "white")  # White default
+        bg_color = color_map.get(name, "white")
 
         logging.info(f"[{bg_color}]Starting Rust tool: {name} with args: {kwargs}[/{bg_color}]")
 
@@ -791,6 +792,7 @@ class ToolRegistry:
         except Exception as e:
             logging.debug(f"Failed to stream tool start: {e}")
 
+        # Check if Rust binary exists
         binary_map = {
             "read_file": "read_file",
             "write_file": "write_file",
@@ -807,10 +809,31 @@ class ToolRegistry:
             "mute_toggle": "system-control",
             "set_volume": "system-control",
         }
-        binary = binary_map[name]
-        if platform.system() == "Windows":
-            binary += ".exe"
-        args = [f"./tools/target/release/{binary}"]
+
+        binary = binary_map.get(name)
+        if not binary:
+            return ToolResult(success=False, data=None, error=f"Unknown Rust tool: {name}")
+
+        exe_ext = ".exe" if platform.system() == "Windows" else ""
+
+        # Check both release and debug directories
+        tools_dir = Path(__file__).parent
+        release_path = tools_dir / "target" / "release" / f"{binary}{exe_ext}"
+        debug_path = tools_dir / "target" / "debug" / f"{binary}{exe_ext}"
+
+        binary_path = None
+        if release_path.exists():
+            binary_path = str(release_path)
+        elif debug_path.exists():
+            binary_path = str(debug_path)
+
+        # If Rust binary doesn't exist, fall back to Python implementation
+        if not binary_path:
+            logging.info(f"Rust tool {name} not found, falling back to Python implementation")
+            return await self._execute_python_fallback(name, **kwargs)
+
+        # Build arguments for Rust tool
+        args = [binary_path]
         if name == "read_file":
             args.extend([kwargs["path"], str(kwargs.get("max_lines", 1000))])
         elif name == "write_file":
@@ -840,6 +863,7 @@ class ToolRegistry:
             args.append(name)
         elif name == "set_volume":
             args.extend([name, str(kwargs["level"])])
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -849,15 +873,10 @@ class ToolRegistry:
             stdout, stderr = await proc.communicate()
             if proc.returncode != 0:
                 error_msg = stderr.decode()
-                logging.error(f"[{bg_color}]Rust tool {name} failed: {error_msg}[/{bg_color}]")
-                # Stream tool failure
-                try:
-                    await streaming_interface.push_tool_activity(
-                        name, "failed", {"error": error_msg, "args": kwargs}
-                    )
-                except Exception as e:
-                    logging.debug(f"Failed to stream tool failure: {e}")
-                return ToolResult(success=False, data=None, error=error_msg)
+                logging.warning(f"[{bg_color}]Rust tool {name} failed: {error_msg}[/{bg_color}]")
+                # Fall back to Python implementation on Rust failure
+                return await self._execute_python_fallback(name, **kwargs)
+
             data = json.loads(stdout.decode())
             logging.info(
                 f"[{bg_color}]Rust tool {name} success: "
@@ -875,15 +894,79 @@ class ToolRegistry:
             )
         except Exception as e:
             error_msg = str(e)
-            logging.error(f"[{bg_color}]Rust tool {name} exception: {error_msg}[/{bg_color}]")
-            # Stream tool failure
-            try:
-                await streaming_interface.push_tool_activity(
-                    name, "failed", {"error": error_msg, "args": kwargs}
+            logging.warning(f"[{bg_color}]Rust tool {name} exception: {error_msg}[/{bg_color}]")
+            # Fall back to Python implementation
+            return await self._execute_python_fallback(name, **kwargs)
+
+    async def _execute_python_fallback(self, name: str, **kwargs: Any) -> ToolResult:
+        """Execute Python fallback implementation when Rust tool is unavailable."""
+        logging.info(f"Executing Python fallback for: {name}")
+
+        try:
+            if name == "read_file":
+                from tools.files import ReadFileTool
+
+                tool = ReadFileTool()
+                return await tool.execute(**kwargs)
+            elif name == "write_file":
+                from tools.files import WriteFileTool
+
+                tool = WriteFileTool()
+                return await tool.execute(**kwargs)
+            elif name == "list_directory":
+                from tools.files import ListDirectoryTool
+
+                tool = ListDirectoryTool()
+                return await tool.execute(**kwargs)
+            elif name == "search_files":
+                from tools.files import SearchFilesTool
+
+                tool = SearchFilesTool()
+                return await tool.execute(**kwargs)
+            elif name == "file_info":
+                from tools.files import FileInfoTool
+
+                tool = FileInfoTool()
+                return await tool.execute(**kwargs)
+            elif name == "get_current_time":
+                from tools.system import GetCurrentTimeTool
+
+                tool = GetCurrentTimeTool()
+                return await tool.execute(**kwargs)
+            elif name == "run_command":
+                from tools.system import RunCommandTool
+
+                tool = RunCommandTool()
+                return await tool.execute(**kwargs)
+            elif name == "execute_python":
+                from tools.code import ExecutePythonTool
+
+                tool = ExecutePythonTool()
+                return await tool.execute(**kwargs)
+            elif name in ["volume_up", "volume_down", "mute_toggle", "set_volume"]:
+                from tools.system.volume_control import (
+                    MuteToggleTool,
+                    SetVolumeTool,
+                    VolumeDownTool,
+                    VolumeUpTool,
                 )
-            except Exception as ex:
-                logging.debug(f"Failed to stream tool failure: {ex}")
-            return ToolResult(success=False, data=None, error=error_msg)
+
+                tool_map = {
+                    "volume_up": VolumeUpTool,
+                    "volume_down": VolumeDownTool,
+                    "mute_toggle": MuteToggleTool,
+                    "set_volume": SetVolumeTool,
+                }
+                tool = tool_map[name]()
+                return await tool.execute(**kwargs)
+            else:
+                return ToolResult(
+                    success=False, data=None, error=f"No Python fallback available for {name}"
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False, data=None, error=f"Python fallback failed for {name}: {str(e)}"
+            )
 
     def get_filtered_schemas(self, query: str, max_tools: int = 25) -> list[dict]:
         query_lower = query.lower()
@@ -963,6 +1046,27 @@ class ToolRegistry:
 
         if name in RUST_TOOLS:
             result = await self._execute_rust_tool(name, **kwargs)
+            # Stream tool completion for Rust tools
+            try:
+                status = "completed" if result.success else "failed"
+                details = {"result": result.data} if result.success else {"error": result.error}
+                await streaming_interface.push_tool_activity(name, status, details)
+            except Exception as e:
+                logging.debug(f"Failed to stream tool completion: {e}")
+
+            # Cache successful results
+            if result.success and result.data is not None:
+                await tool_cache.set(cache_key, result)
+
+            # Record tool usage for performance monitoring
+            try:
+                from core.performance_monitor import performance_monitor
+
+                performance_monitor.record_tool_usage(name)
+            except Exception:
+                pass  # Don't fail if monitoring isn't available
+
+            return result
         else:
             tool = self.get(name)
             if not tool:

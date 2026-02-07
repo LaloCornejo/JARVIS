@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -174,7 +174,6 @@ class PatternAnalyzer:
 
     def _pattern_from_dict(self, data: Dict[str, Any]) -> UserPattern:
         """Create pattern from dictionary"""
-        from datetime import time
 
         return UserPattern(
             id=data["id"],

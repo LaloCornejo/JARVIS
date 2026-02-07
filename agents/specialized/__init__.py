@@ -14,27 +14,33 @@ This module provides domain-specific agents for various tasks:
 
 from __future__ import annotations
 
-from agents.specialized.code_review import CodeReviewAgent, CodeIssue, ReviewResult
+from agents.specialized.code_review import CodeIssue, CodeReviewAgent, ReviewResult
 from agents.specialized.creative import (
-    CreativeAgent,
-    CreativePiece,
-    CreativeCritique,
     BrainstormResult,
+    CreativeAgent,
+    CreativeCritique,
+    CreativePiece,
 )
-from agents.specialized.planning import PlanningAgent, Task, Milestone, ProjectPlan, PlanAdjustment
-from agents.specialized.research import (
-    ResearchAgent,
-    ResearchSource,
-    ResearchFinding,
-    ResearchReport,
+from agents.specialized.legacy import (
+    LegacyCodeAgent as _LegacyCodeAgent,
+)
+from agents.specialized.legacy import (
+    LegacyMemoryAgent as _LegacyMemoryAgent,
 )
 
 # Legacy agents (keeping for backward compatibility)
 from agents.specialized.legacy import (
     LegacyResearchAgent as _LegacyResearchAgent,
-    LegacyCodeAgent as _LegacyCodeAgent,
+)
+from agents.specialized.legacy import (
     LegacyTaskAgent as _LegacyTaskAgent,
-    LegacyMemoryAgent as _LegacyMemoryAgent,
+)
+from agents.specialized.planning import Milestone, PlanAdjustment, PlanningAgent, ProjectPlan, Task
+from agents.specialized.research import (
+    ResearchAgent,
+    ResearchFinding,
+    ResearchReport,
+    ResearchSource,
 )
 
 # Export the enhanced versions as primary

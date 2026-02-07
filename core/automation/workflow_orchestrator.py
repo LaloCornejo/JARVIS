@@ -11,12 +11,11 @@ This module provides sophisticated workflow automation capabilities including:
 """
 
 import asyncio
-import json
 import logging
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Union
 from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Set
 
 log = logging.getLogger(__name__)
 
@@ -228,7 +227,7 @@ class WorkflowTemplate:
         if isinstance(data, str):
             # Replace {{param_name}} with parameter values
             for key, value in params.items():
-                data = data.replace(f"{{{{key}}}}", str(value))
+                data = data.replace("{{key}}", str(value))
             return data
         elif isinstance(data, dict):
             return {k: self._substitute_parameters(v, params) for k, v in data.items()}

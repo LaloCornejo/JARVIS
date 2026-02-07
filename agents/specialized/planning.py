@@ -12,15 +12,14 @@ This agent provides:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional
 
-from agents.base import AgentContext, AgentMessage, AgentRole, BaseAgent
+from agents.base import AgentContext, AgentRole, BaseAgent
 from core.llm import OllamaClient
 
 log = logging.getLogger(__name__)
@@ -593,28 +592,28 @@ Respond in JSON format as a list of tasks."""
                 "dependencies": [],
             },
             {
-                "title": f"Design and architecture",
+                "title": "Design and architecture",
                 "description": "Create detailed design and architecture plan",
                 "duration": "1 day",
                 "priority": "high",
                 "dependencies": [f"Planning and research for {title}"],
             },
             {
-                "title": f"Implementation",
+                "title": "Implementation",
                 "description": "Execute the main implementation work",
                 "duration": "3 days",
                 "priority": "critical",
                 "dependencies": ["Design and architecture"],
             },
             {
-                "title": f"Testing and validation",
+                "title": "Testing and validation",
                 "description": "Test and validate the work",
                 "duration": "1 day",
                 "priority": "high",
                 "dependencies": ["Implementation"],
             },
             {
-                "title": f"Review and documentation",
+                "title": "Review and documentation",
                 "description": "Final review and documentation",
                 "duration": "4 hours",
                 "priority": "medium",

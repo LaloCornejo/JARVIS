@@ -185,6 +185,17 @@ class OptimizedLLMClient:
         client = await self._get_client()
 
         try:
+            # Debug: Log request data for troubleshooting
+            import json as json_mod
+
+            log.debug(
+                f"[NVIDIA] Sending request to {endpoint} with {len(request_data.get('messages', []))} messages"
+            )
+            for i, msg in enumerate(request_data.get("messages", [])[:3]):  # Log first 3 messages
+                log.debug(
+                    f"[NVIDIA] Message {i}: role={msg.get('role')}, content_len={len(str(msg.get('content', '')))}, has_tool_calls={bool(msg.get('tool_calls'))}"
+                )
+
             async with client.stream(
                 "POST",
                 f"{self.base_url}{endpoint}",
@@ -374,6 +385,19 @@ class OptimizedLLMClient:
                     log.debug(f"[NVIDIA SSE] Yielded final chunk, size: {len(buffer)}")
                     # full_response already contains buffer content from earlier accumulation
 
+        except httpx.HTTPStatusError as e:
+            # Capture response body for HTTP errors
+            error_body = ""
+            try:
+                error_body = await e.response.aread()
+                error_body = error_body.decode("utf-8", errors="replace")[:500]
+            except:
+                pass
+            log.error(f"Streaming chat HTTP error: {e.response.status_code} - {error_body}")
+            yield {
+                "type": "error",
+                "error": f"HTTP {e.response.status_code}: {error_body or str(e)}",
+            }
         except Exception as e:
             log.error(f"Streaming chat error: {e}")
             yield {"type": "error", "error": str(e)}
@@ -388,10 +412,38 @@ class OptimizedLLMClient:
             nvidia_messages.append({"role": "system", "content": system})
 
         for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+
+            # Skip messages with no content and no tool_calls (except system/user/assistant)
+            if (
+                not content
+                and not msg.get("tool_calls")
+                and role not in ["system", "user", "assistant"]
+            ):
+                log.debug(f"[NVIDIA] Skipping message with role={role}, no content")
+                continue
+
             # NVIDIA API expects slightly different format
-            nvidia_msg = {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+            nvidia_msg = {"role": role, "content": content if content else ""}
+
+            # Handle tool_calls (assistant messages)
             if tool_calls := msg.get("tool_calls"):
                 nvidia_msg["tool_calls"] = tool_calls
+
+            # Handle tool result messages (role: "tool")
+            if role == "tool":
+                tool_call_id = msg.get("tool_call_id", "")
+                # Ensure content is a string
+                if not isinstance(content, str):
+                    import json
+
+                    content = json.dumps(content)
+                nvidia_msg["content"] = content
+                # Only add tool_call_id if it exists
+                if tool_call_id:
+                    nvidia_msg["tool_call_id"] = tool_call_id
+
             nvidia_messages.append(nvidia_msg)
 
         # Try different model identifiers if the simple one doesn't work
