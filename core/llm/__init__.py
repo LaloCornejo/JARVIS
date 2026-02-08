@@ -10,7 +10,7 @@ _fast_client: OllamaClient | None = None
 def get_vision_client() -> OllamaClient:
     global _vision_client
     if _vision_client is None:
-        _vision_client = OllamaClient(model="huihui_ai/qwen3-vl-abliterated:4b")
+        _vision_client = OllamaClient(model="huihui_ai/qwen3-vl-abliterated:8b-instruct")
         # Preload the model asynchronously
         import asyncio
 

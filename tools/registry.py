@@ -195,7 +195,13 @@ TOOL_CATEGORIES = {
         ],
     },
     "files": {
-        "tools": ["read_file", "write_file", "list_directory", "search_files", "file_info"],
+        "tools": [
+            "read_file",
+            "write_file",
+            "list_directory",
+            "search_files",
+            "file_info",
+        ],
         "keywords": [
             "file",
             "folder",
@@ -283,7 +289,11 @@ TOOL_CATEGORIES = {
         "keywords": ["youtube", "video", "watch", "stream"],
     },
     "calendar": {
-        "tools": ["calendar_list_events", "calendar_create_event", "calendar_delete_event"],
+        "tools": [
+            "calendar_list_events",
+            "calendar_create_event",
+            "calendar_delete_event",
+        ],
         "keywords": [
             "calendar",
             "event",
@@ -304,7 +314,16 @@ TOOL_CATEGORIES = {
             "obsidian_search",
             "obsidian_daily_note",
         ],
-        "keywords": ["note", "notes", "obsidian", "write", "journal", "daily", "memo", "document"],
+        "keywords": [
+            "note",
+            "notes",
+            "obsidian",
+            "write",
+            "journal",
+            "daily",
+            "memo",
+            "document",
+        ],
     },
     "email": {
         "tools": ["gmail_list", "gmail_read", "gmail_send", "gmail_mark_read"],
@@ -415,8 +434,21 @@ TOOL_CATEGORIES = {
         ],
     },
     "memory": {
-        "tools": ["store_memory", "recall_memory", "forget_memory", "list_memory_categories"],
-        "keywords": ["remember", "memory", "forget", "recall", "store", "save", "memorize"],
+        "tools": [
+            "store_memory",
+            "recall_memory",
+            "forget_memory",
+            "list_memory_categories",
+        ],
+        "keywords": [
+            "remember",
+            "memory",
+            "forget",
+            "recall",
+            "store",
+            "save",
+            "memorize",
+        ],
     },
     "screenshot": {
         "tools": [
@@ -575,7 +607,13 @@ TOOL_CATEGORIES = {
     },
 }
 
-CORE_TOOLS = ["get_current_time", "web_search", "run_command", "list_open_apps", "launch_app"]
+CORE_TOOLS = [
+    "get_current_time",
+    "web_search",
+    "run_command",
+    "list_open_apps",
+    "launch_app",
+]
 
 RUST_TOOLS = {
     "get_current_time",
@@ -890,7 +928,9 @@ class ToolRegistry:
             except Exception as e:
                 logging.debug(f"Failed to stream tool completion: {e}")
             return ToolResult(
-                success=data["exit_code"] == 0, data=data["stdout"], error=data["stderr"]
+                success=data["exit_code"] == 0,
+                data=data["stdout"],
+                error=data["stderr"],
             )
         except Exception as e:
             error_msg = str(e)
@@ -961,11 +1001,15 @@ class ToolRegistry:
                 return await tool.execute(**kwargs)
             else:
                 return ToolResult(
-                    success=False, data=None, error=f"No Python fallback available for {name}"
+                    success=False,
+                    data=None,
+                    error=f"No Python fallback available for {name}",
                 )
         except Exception as e:
             return ToolResult(
-                success=False, data=None, error=f"Python fallback failed for {name}: {str(e)}"
+                success=False,
+                data=None,
+                error=f"Python fallback failed for {name}: {str(e)}",
             )
 
     def get_filtered_schemas(self, query: str, max_tools: int = 25) -> list[dict]:
@@ -1106,7 +1150,7 @@ class ToolRegistry:
         except Exception:
             pass  # Don't fail if monitoring isn't available
 
-            return result
+        return result
 
     async def initialize_mcp(self) -> dict[str, bool]:
         """Initialize MCP integration and register MCP tools."""
