@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import numpy as np
 import openwakeword
@@ -377,7 +377,8 @@ class VoiceAssistant:
 
             if routing["use_agent"] and routing["confidence"] > 0.7:
                 log.info(
-                    f"Routing to specialized agent: {routing['agent_type']} (confidence: {routing['confidence']:.2f})"
+                    f"Routing to specialized agent: {routing['agent_type']} "
+                    f"(confidence: {routing['confidence']:.2f})"
                 )
                 agent_response = await orchestrator.process_with_agent(
                     agent_type=routing["agent_type"],
@@ -405,7 +406,8 @@ class VoiceAssistant:
                     return response_text
                 else:
                     log.warning(
-                        f"Agent processing failed: {agent_response.get('error')}, falling back to standard processing"
+                        f"Agent processing failed: {agent_response.get('error')}, "
+                        f"falling back to standard processing"
                     )
         except Exception as e:
             log.debug(f"Agent routing failed: {e}, using standard processing")
@@ -857,7 +859,8 @@ class VoiceAssistant:
                 if identification["success"] and identification["confidence"] > 0.6:
                     self._current_user_id = identification["speaker_id"]
                     log.info(
-                        f"Identified user via voice: {identification['speaker_name']} (confidence: {identification['confidence']:.2f})"
+                        f"Identified user via voice: {identification['speaker_name']} "
+                        f"(confidence: {identification['confidence']:.2f})"
                     )
 
                     # Update user context

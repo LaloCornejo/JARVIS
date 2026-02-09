@@ -768,7 +768,10 @@ Respond in JSON format as a list of tasks."""
                     {
                         "type": "resource",
                         "severity": "medium",
-                        "description": f"May need {concurrent_tasks} resources but only {max_resources} available",
+                        "description": (
+                            f"May need {concurrent_tasks} resources but only "
+                            f"{max_resources} available"
+                        ),
                         "mitigation": "Adjust timeline to reduce parallel work",
                     }
                 )
@@ -870,7 +873,6 @@ Respond in JSON format as a list of tasks."""
     def _find_resource_conflicts(self, plan: ProjectPlan) -> List[Dict[str, Any]]:
         """Find resource conflicts"""
         conflicts = []
-        resource_tasks: Dict[str, List[str]] = {}
 
         # Group tasks by resource
         for resource, task_ids in plan.resources.get("allocated", {}).items():

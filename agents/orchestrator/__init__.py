@@ -47,6 +47,11 @@ __all__ = [
     "RoutingDecision",
     "get_orchestrator",
     "reset_orchestrator",
+    # Imported specialized agents
+    "CodeReviewAgent",
+    "CreativeAgent",
+    "PlanningAgent",
+    "ResearchAgent",
 ]
 
 

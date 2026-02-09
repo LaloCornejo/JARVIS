@@ -40,7 +40,7 @@ def run_server(args: list[str]) -> int:
     """Run the JARVIS server and return exit code."""
     python = get_python_executable()
 
-    cmd = [python, "-c", "from core.websocket_server import run_server; run_server()", *args]
+    cmd = [python, "-m", "core.websocket_server", *args]
 
     try:
         result = subprocess.run(cmd, check=False)
@@ -74,15 +74,15 @@ def main():
         restart_count += 1
 
         if restart_count > MAX_RESTARTS:
-            print(f"⚠️  Maximum restart attempts ({MAX_RESTARTS}) reached. Giving up.")
+            print(f"! Maximum restart attempts ({MAX_RESTARTS}) reached. Giving up.")
             sys.exit(1)
 
         if restart_count > 1:
-            print(f"🔄 Restart attempt {restart_count}/{MAX_RESTARTS}")
-            print(f"⏳ Waiting {RESTART_DELAY}s before starting...")
+            print(f"* Restart attempt {restart_count}/{MAX_RESTARTS}")
+            print(f"> Waiting {RESTART_DELAY}s before starting...")
             time.sleep(RESTART_DELAY)
 
-        print("🚀 Starting JARVIS server...")
+        print(">>> Starting JARVIS server...")
         print()
 
         # Build server args

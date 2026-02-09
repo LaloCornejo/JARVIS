@@ -321,4 +321,13 @@ def run_server(
 
 
 if __name__ == "__main__":
-    run_server()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="JARVIS WebSocket Server")
+    parser.add_argument("--host", default="localhost", help="Server host (default: localhost)")
+    parser.add_argument("--port", type=int, default=8000, help="Server port (default: 8000)")
+    parser.add_argument("--no-debug", action="store_true", help="Disable debug mode")
+
+    args = parser.parse_args()
+
+    run_server(host=args.host, port=args.port, debug=not args.no_debug)
