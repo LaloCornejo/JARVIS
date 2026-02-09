@@ -59,6 +59,16 @@ class YouTubeClient:
                     }
                 )
             return results
+        else:
+            # Provide better error information
+            error_text = response.text
+            try:
+                error_data = response.json()
+                if "error" in error_data:
+                    error_message = error_data["error"].get("message", error_text)
+                    raise Exception(f"YouTube API error: {error_message}")
+            except Exception:
+                raise Exception(f"YouTube API error ({response.status_code}): {error_text}")
         return []
 
     async def get_video_info(self, video_id: str) -> dict[str, Any] | None:
@@ -150,7 +160,8 @@ class YouTubeSearchTool(BaseTool):
                 return ToolResult(success=True, data=results)
             return ToolResult(success=False, data=None, error="No results found")
         except Exception as e:
-            return ToolResult(success=False, data=None, error=str(e))
+            error_msg = f"YouTube search failed: {str(e)}"
+            return ToolResult(success=False, data=None, error=error_msg)
 
 
 class YouTubePlayTool(BaseTool):

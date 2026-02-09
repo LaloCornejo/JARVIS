@@ -129,7 +129,9 @@ class AgentOrchestrator:
                 confidence=primary_confidence,
                 supporting_agents=supporting,
                 strategy="collaborative" if supporting else "single",
-                reason=f"Primary: {primary_agent} ({primary_confidence:.2f}), Supporting: {supporting}",
+                reason=(
+                    f"Primary: {primary_agent} ({primary_confidence:.2f}), Supporting: {supporting}"
+                ),
             )
         else:
             # Low confidence - try multiple agents

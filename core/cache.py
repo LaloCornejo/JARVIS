@@ -93,7 +93,8 @@ class ResponseCache:
                         self._evict_lru_entry()
                 if eviction_count > 0:
                     log.debug(
-                        f"Critical memory pressure ({memory_mb:.1f}MB): Evicted {eviction_count} cache entries"
+                        f"Critical memory pressure ({memory_mb:.1f}MB): "
+                        f"Evicted {eviction_count} cache entries"
                     )
             elif memory_mb > self._memory_threshold_mb:
                 # Moderate memory pressure - gently evict oldest entries
@@ -104,44 +105,6 @@ class ResponseCache:
                     )
         except Exception as e:
             log.debug(f"Memory pressure management failed: {e}")
-
-    def _remove_expired_entry(self, key: str) -> None:
-        """Remove a single expired entry"""
-        self.cache.pop(key, None)
-        self.access_times.pop(key, None)
-
-    def _evict_lru_entry(self) -> None:
-        """Remove least recently used entry"""
-        if self.access_times:
-            lru_key = min(self.access_times, key=self.access_times.get)
-            self._remove_expired_entry(lru_key)
-            log.debug(f"Evicted LRU entry: {lru_key[:8]}...")
-
-    async def clear(self) -> None:
-        """Clear all cache entries"""
-        async with self._lock:
-            self.cache.clear()
-            self.access_times.clear()
-            log.info("Response cache cleared")
-
-    async def get_stats(self) -> Dict[str, Any]:
-        """Get cache statistics"""
-        async with self._lock:
-            now = datetime.now()
-            valid_entries = sum(
-                1
-                for entry in self.cache.values()
-                if datetime.fromisoformat(entry["expires_at"]) > now
-            )
-            return {
-                "total_entries": len(self.cache),
-                "valid_entries": valid_entries,
-                "eviction_count": len(self.access_times) - valid_entries,
-                "max_size": self.max_size,
-                "ttl_seconds": self.ttl_seconds,
-            }
-            self.access_times[key] = time.time()
-            log.debug(f"Cached response for key: {key[:8]}...")
 
     def _remove_expired_entry(self, key: str) -> None:
         """Remove a single expired entry"""

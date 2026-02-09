@@ -65,7 +65,8 @@ class CodeReviewAgent(BaseAgent):
 - Design patterns and architecture
 - Code style and readability
 
-Analyze code thoroughly and provide actionable feedback. Be specific about issues and provide concrete suggestions for improvement.
+Analyze code thoroughly and provide actionable feedback. Be specific about issues and
+provide concrete suggestions for improvement.
 
 Respond in JSON format with:
 {
@@ -301,13 +302,13 @@ Respond in JSON format with:
     async def _calculate_metrics(self, code: str, language: str) -> Dict[str, Any]:
         """Calculate code quality metrics"""
         lines = code.splitlines()
-        non_empty_lines = [l for l in lines if l.strip()]
+        non_empty_lines = [line for line in lines if line.strip()]
 
         metrics = {
             "total_lines": len(lines),
             "code_lines": len(non_empty_lines),
             "blank_lines": len(lines) - len(non_empty_lines),
-            "average_line_length": sum(len(l) for l in non_empty_lines) / len(non_empty_lines)
+            "average_line_length": sum(len(line) for line in non_empty_lines) / len(non_empty_lines)
             if non_empty_lines
             else 0,
             "language": language,
@@ -604,4 +605,7 @@ Respond in JSON format with:
         self, title: str, description: str, file_reviews: List[Dict]
     ) -> str:
         """Generate overall PR summary"""
-        return f"PR '{title}' reviewed: {len(file_reviews)} files, average score {sum(fr['review'].score for fr in file_reviews) / len(file_reviews):.1f}/100"
+        avg_score = sum(fr["review"].score for fr in file_reviews) / len(file_reviews)
+        return (
+            f"PR '{title}' reviewed: {len(file_reviews)} files, average score {avg_score:.1f}/100"
+        )

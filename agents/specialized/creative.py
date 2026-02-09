@@ -67,7 +67,10 @@ class CreativeAgent(BaseAgent):
 
     name = "CreativeAgent"
     role = AgentRole.TASK
-    description = "Generates creative content including stories, poems, articles, and provides creative feedback"
+    description = (
+        "Generates creative content including stories, poems, articles, "
+        "and provides creative feedback"
+    )
     system_prompt = """You are a creative writing expert with expertise in:
 - Fiction writing (short stories, novels, flash fiction)
 - Poetry (various forms and styles)
@@ -332,7 +335,8 @@ Provide only the rewritten content:"""
         word_counts = {"short": 200, "medium": 500, "long": 1000}
         target_words = word_counts.get(length, 500)
 
-        prompt = f"""Continue the following story. Maintain consistency with characters, tone, and style.
+        prompt = f"""Continue the following story. Maintain consistency with
+characters, tone, and style.
 
 Existing story:
 {existing_content}
