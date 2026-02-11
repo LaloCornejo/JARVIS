@@ -1,6 +1,5 @@
 """WebSocket server for JARVIS TUI client communication"""
 
-import asyncio
 import json
 import logging
 import sys
@@ -18,7 +17,6 @@ from rich.logging import RichHandler
 
 from core.discord_bot import discord_bot_handler
 from core.telegram_bot import telegram_bot_handler
-from core.whatsapp_bot import whatsapp_bot_handler
 from jarvis.server import JarvisServer
 
 log = logging.getLogger("jarvis.websocket")
@@ -216,16 +214,9 @@ async def discord_stop():
     return {"running": discord_bot_handler.is_running()}
 
 
-@app.post("/whatsapp/stop")
-async def whatsapp_stop():
-    """Stop WhatsApp bot"""
-    await whatsapp_bot_handler.stop()
-    return {"running": whatsapp_bot_handler.is_running()}
-
-
 @app.on_event("startup")
 async def startup_event():
-    """Start Telegram, Discord, and WhatsApp bots on server startup."""
+    """Start Telegram and Discord bots on server startup."""
     log.info("[SERVER] Starting up...")
     import os
 
@@ -254,11 +245,13 @@ async def startup_event():
         except Exception as e:
             log.error(f"[TELEGRAM] Error starting bot: {e}")
     else:
-        log.info("[TELEGRAM] Bot not started (TELEGRAM_BOT_TOKEN not set)")
+        log.info("[TELEGRAM] Skipping bot start (TELEGRAM_BOT_TOKEN not set)")
 
     # Start Discord bot if configured
     if os.environ.get("DISCORD_BOT_TOKEN"):
         try:
+            from core.discord_bot import discord_bot_handler
+
             success = await discord_bot_handler.start(jarvis_server)
             if success:
                 log.info("[DISCORD] Bot started automatically with server")
@@ -267,34 +260,27 @@ async def startup_event():
         except Exception as e:
             log.error(f"[DISCORD] Error starting bot: {e}")
     else:
-        log.info("[DISCORD] Bot not started (DISCORD_BOT_TOKEN not set)")
+        log.info("[DISCORD] Skipping bot start (DISCORD_BOT_TOKEN not set)")
 
-    # Initialize WhatsApp bot (QR code login - no credentials needed)
     try:
-        # Schedule WhatsApp bot startup asynchronously to avoid blocking startup
-        async def start_whatsapp_async():
-            success = await whatsapp_bot_handler.start(jarvis_server)
-            if success:
-                log.info("[WHATSAPP] Bot handler initialized")
-            else:
-                log.warning("[WHATSAPP] Bot handler failed to initialize")
-
-        # Run in background to avoid blocking startup
-        # We need to get the event loop and create task properly
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        loop.create_task(start_whatsapp_async())
+        log.info("[MCP] Initializing MCP servers...")
+        mcp_results = await jarvis_server.tools.initialize_mcp()
+        if mcp_results:
+            connected = sum(1 for success in mcp_results.values() if success)
+            total = len(mcp_results)
+            log.info(f"[MCP] Initialized {connected}/{total} MCP servers")
+            for server, success in mcp_results.items():
+                status = "connected" if success else "failed"
+                log.info(f"[MCP]   - {server}: {status}")
+        else:
+            log.warning("[MCP] No MCP servers configured or MCP disabled")
     except Exception as e:
-        log.error(f"[WHATSAPP] Error initializing bot handler: {e}")
+        log.error(f"[MCP] Error initializing MCP: {e}")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Stop Telegram, Discord, and WhatsApp bots on server shutdown."""
+    """Stop Telegram and Discord bots on server shutdown."""
     log.info("[SERVER] Shutting down...")
     if telegram_bot_handler.is_running():
         await telegram_bot_handler.stop()
@@ -302,9 +288,6 @@ async def shutdown_event():
     if discord_bot_handler.is_running():
         await discord_bot_handler.stop()
         log.info("[DISCORD] Bot stopped")
-    # Stop WhatsApp bot handler
-    await whatsapp_bot_handler.stop()
-    log.info("[WHATSAPP] Bot handler stopped")
 
 
 def run_server(

@@ -37,10 +37,15 @@ from tools.integrations.github import (
     GitHubSearchTool,
 )
 from tools.integrations.gmail import (
+    GmailArchiveTool,
+    GmailDeleteTool,
     GmailListTool,
     GmailMarkReadTool,
+    GmailMarkUnreadTool,
     GmailReadTool,
+    GmailReplyTool,
     GmailSendTool,
+    GmailStarTool,
 )
 from tools.integrations.google_calendar import (
     CalendarCreateEventTool,
@@ -147,6 +152,11 @@ __all__ = [
     "GmailReadTool",
     "GmailSendTool",
     "GmailMarkReadTool",
+    "GmailMarkUnreadTool",
+    "GmailDeleteTool",
+    "GmailArchiveTool",
+    "GmailStarTool",
+    "GmailReplyTool",
     "DiscordSendMessageTool",
     "DiscordReadMessagesTool",
     "DiscordListChannelsTool",

@@ -511,17 +511,28 @@ class VoiceAssistant:
                         log.warning("Failed to extract vision response: %s", e)
                         is_vision_tool = False
 
-                if not is_vision_tool:
-                    log.info("Starting second LLM pass to summarize tool results")
+            if not is_vision_tool:
+                log.info("Starting second LLM pass to summarize tool results")
+                # RL-style retry: keep trying until we get a proper answer
+                max_attempts = 3
+                for attempt in range(max_attempts):
                     full_response = ""
                     # Get recent messages from shared buffer for context
                     recent_messages = await self._conversation_buffer.get_recent_messages(
                         self._max_messages
                     )
+                    # Add retry instruction if this isn't the first attempt
+                    attempt_prompt = system_prompt
+                    if attempt > 0:
+                        attempt_prompt += "\n\nIMPORTANT: You have tool results above. DO NOT make more tool calls. "
+                        attempt_prompt += (
+                            "Provide a natural response to the user based on the results. "
+                        )
+                        attempt_prompt += f"This is attempt {attempt + 1}/{max_attempts}."
 
                     async for chunk in client.chat(
                         messages=recent_messages,
-                        system=system_prompt,
+                        system=attempt_prompt,
                     ):
                         if self._interrupted:
                             log.info("LLM generation interrupted")
@@ -529,7 +540,30 @@ class VoiceAssistant:
                         if msg := chunk.get("message", {}):
                             if content := msg.get("content"):
                                 full_response += content
-                    log.info("Second LLM pass done, response_len=%d", len(full_response))
+                            # Check if model is trying to make more tool calls
+                            if msg.get("tool_calls"):
+                                log.warning(
+                                    f"Attempt {attempt + 1}: Model made more tool calls, retrying..."
+                                )
+                                full_response = ""
+                                break
+
+                    # Check if response looks like a tool call
+                    if self._looks_like_tool_call(full_response):
+                        log.warning(
+                            f"Attempt {attempt + 1}: Response contains tool calls, retrying..."
+                        )
+                        if attempt == max_attempts - 1:
+                            log.error("Max attempts reached, forcing a response")
+                            full_response = "I've completed the requested action. Is there anything else I can help you with?"
+                        continue
+
+                    # Success - we got a proper response
+                    log.info(
+                        f"Second LLM pass done on attempt {attempt + 1}, response_len=%d",
+                        len(full_response),
+                    )
+                    break
 
             log.info("LLM chat complete, response length: %d", len(full_response))
         except asyncio.CancelledError:
@@ -553,24 +587,47 @@ class VoiceAssistant:
             tool_results = await self._process_tool_calls(tool_calls)
             for result in tool_results:
                 await self._conversation_buffer.add_message(result)
-            # Generate final response
-            full_response = ""
-            # Get recent messages from shared buffer for context
-            recent_messages = await self._conversation_buffer.get_recent_messages(
-                self._max_messages
-            )
+            # Generate final response with RL-style retry
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                full_response = ""
+                # Get recent messages from shared buffer for context
+                recent_messages = await self._conversation_buffer.get_recent_messages(
+                    self._max_messages
+                )
+                # Add retry instruction if needed
+                attempt_prompt = system_prompt
+                if attempt > 0:
+                    attempt_prompt += "\n\nIMPORTANT: All tools have been executed. DO NOT make more tool calls. "
+                    attempt_prompt += f"Provide a natural response to the user. Attempt {attempt + 1}/{max_attempts}."
 
-            async for chunk in client.chat(
-                messages=recent_messages,
-                system=system_prompt,
-            ):
-                if self._interrupted:
-                    log.info("LLM generation interrupted")
-                    return None
-                if msg := chunk.get("message", {}):
-                    if content := msg.get("content"):
-                        full_response += content
-            log.info("Final response after tool calls: %d chars", len(full_response))
+                async for chunk in client.chat(
+                    messages=recent_messages,
+                    system=attempt_prompt,
+                ):
+                    if self._interrupted:
+                        log.info("LLM generation interrupted")
+                        return None
+                    if msg := chunk.get("message", {}):
+                        if content := msg.get("content"):
+                            full_response += content
+                        if msg.get("tool_calls"):
+                            log.warning(
+                                f"Attempt {attempt + 1}: Model made more tool calls, retrying..."
+                            )
+                            full_response = ""
+                            break
+
+                # Check if response looks like a tool call
+                if self._looks_like_tool_call(full_response):
+                    log.warning(f"Attempt {attempt + 1}: Response contains tool calls, retrying...")
+                    if attempt == max_attempts - 1:
+                        log.error("Max attempts reached, forcing a response")
+                        full_response = "I've completed the requested action. Is there anything else I can help you with?"
+                    continue
+
+                log.info("Final response after tool calls: %d chars", len(full_response))
+                break
 
         await self._conversation_buffer.add_message({"role": "assistant", "content": full_response})
 
@@ -772,6 +829,28 @@ class VoiceAssistant:
     async def _execute_single_tool_async(self, call: dict) -> dict:
         """Execute a single tool call asynchronously (for parallel execution)"""
         return await self._execute_single_tool(call)
+
+    def _looks_like_tool_call(self, response_text: str) -> bool:
+        """Check if the response looks like it's trying to make a tool call."""
+        if not response_text:
+            return False
+        text = response_text.lower()
+        # Patterns that indicate tool calls
+        patterns = [
+            r"<tool_call>",
+            r"function_call",
+            r"\"name\":\s*\"\w+_\w+\"",  # JSON tool name pattern
+            r"launch_app\s*\(",
+            r"run_command\s*\(",
+            r"web_search\s*\(",
+            r"execute_python\s*\(",
+        ]
+        import re
+
+        for pattern in patterns:
+            if re.search(pattern, text):
+                return True
+        return False
 
     def _parse_tool_calls_from_text(self, response_text: str) -> list[dict]:
         """Parse tool calls embedded in the response text."""

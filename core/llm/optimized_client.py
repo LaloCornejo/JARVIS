@@ -24,9 +24,7 @@ class ContextSummarizer:
         self.summary_cache = {}
         self.max_summary_length = 500
 
-    async def summarize(
-        self, messages: List[Dict[str, Any]], max_length: int = None
-    ) -> str:
+    async def summarize(self, messages: List[Dict[str, Any]], max_length: int = None) -> str:
         """Summarize conversation history for context optimization"""
         if not messages:
             return ""
@@ -36,9 +34,7 @@ class ContextSummarizer:
 
         # Create cache key from message contents
         content_hash = hashlib.md5(
-            json.dumps(
-                [msg.get("content", "") for msg in messages], sort_keys=True
-            ).encode()
+            json.dumps([msg.get("content", "") for msg in messages], sort_keys=True).encode()
         ).hexdigest()
 
         if content_hash in self.summary_cache:
@@ -72,12 +68,8 @@ class ContextSummarizer:
                     important_messages.append(msg)
 
             # Keep assistant responses to important user messages
-            assistant_messages = [
-                msg for msg in messages if msg.get("role") == "assistant"
-            ]
-            important_messages.extend(
-                assistant_messages[-2:]
-            )  # Last 2 assistant responses
+            assistant_messages = [msg for msg in messages if msg.get("role") == "assistant"]
+            important_messages.extend(assistant_messages[-2:])  # Last 2 assistant responses
 
             # Create summary
             summary_parts = []
@@ -156,9 +148,7 @@ class OptimizedLLMClient:
         self, messages: list, system: str = None, tools: list = None
     ) -> AsyncIterator[dict]:
         """Alias for chat_streaming for backward compatibility"""
-        async for chunk in self.chat_streaming(
-            messages=messages, system=system, tools=tools
-        ):
+        async for chunk in self.chat_streaming(messages=messages, system=system, tools=tools):
             yield chunk
 
     async def chat_streaming(
@@ -190,14 +180,20 @@ class OptimizedLLMClient:
         if enable_caching:
             cache_key = self._generate_cache_key(optimized_messages, system, tools)
             if cached_response := self._response_cache.get(cache_key):
-                async for chunk in self._stream_cached_response(
-                    cached_response, stream_callback
-                ):
+                async for chunk in self._stream_cached_response(cached_response, stream_callback):
                     yield chunk
                 return
 
         # Prepare request based on backend
         if self.backend == "nvidia":
+            # Validate API key for NVIDIA backend
+            if not self.api_key:
+                log.error("[NVIDIA] API key is not set. Set NVIDIA_API_KEY environment variable.")
+                yield {
+                    "type": "error",
+                    "error": "NVIDIA API key is not configured. Set NVIDIA_API_KEY environment variable.",
+                }
+                return
             request_data = self._prepare_nvidia_request(
                 optimized_messages, system, tools, context_window
             )
@@ -212,14 +208,14 @@ class OptimizedLLMClient:
 
         try:
             # Debug: Log request data for troubleshooting
-            import json as json_mod
-
             log.debug(
                 f"[NVIDIA] Sending request to {endpoint} with {len(request_data.get('messages', []))} messages"
             )
-            for i, msg in enumerate(
-                request_data.get("messages", [])[:3]
-            ):  # Log first 3 messages
+            log.debug(
+                f"[NVIDIA] Request model: {request_data.get('model')}, stream: {request_data.get('stream')}"
+            )
+            log.debug(f"[NVIDIA] Request payload: {json.dumps(request_data, indent=2)[:2000]}")
+            for i, msg in enumerate(request_data.get("messages", [])[:3]):  # Log first 3 messages
                 log.debug(
                     f"[NVIDIA] Message {i}: role={msg.get('role')}, content_len={len(str(msg.get('content', '')))}, has_tool_calls={bool(msg.get('tool_calls'))}"
                 )
@@ -230,6 +226,17 @@ class OptimizedLLMClient:
                 json=request_data,
                 timeout=self.timeout,
             ) as response:
+                # Check status and capture error body BEFORE streaming
+                if response.status_code >= 400:
+                    error_body = await response.aread()
+                    error_text = error_body.decode("utf-8", errors="replace")[:2000]
+                    log.error(f"[NVIDIA] HTTP {response.status_code} error: {error_text}")
+                    log.error(f"[NVIDIA] Response headers: {dict(response.headers)}")
+                    yield {
+                        "type": "error",
+                        "error": f"HTTP {response.status_code}: {error_text}",
+                    }
+                    return
                 response.raise_for_status()
 
                 full_response = ""
@@ -251,9 +258,7 @@ class OptimizedLLMClient:
                                 break
 
                             if "error" in parsed_data:
-                                log.debug(
-                                    f"[NVIDIA SSE] Error in stream: {parsed_data['error']}"
-                                )
+                                log.debug(f"[NVIDIA SSE] Error in stream: {parsed_data['error']}")
                                 yield {"type": "error", "error": parsed_data["error"]}
                                 return
 
@@ -308,9 +313,7 @@ class OptimizedLLMClient:
                             elif "content" in parsed_data and parsed_data["content"]:
                                 # Handle direct content (not wrapped in message)
                                 content = parsed_data["content"]
-                                log.debug(
-                                    f"[NVIDIA SSE] Direct content chunk: {content}"
-                                )
+                                log.debug(f"[NVIDIA SSE] Direct content chunk: {content}")
                                 buffer += content
                                 full_response += content  # Accumulate immediately
                                 log.debug(
@@ -422,12 +425,18 @@ class OptimizedLLMClient:
             error_body = ""
             try:
                 error_body = await e.response.aread()
-                error_body = error_body.decode("utf-8", errors="replace")[:500]
-            except:
-                pass
+                error_body = error_body.decode("utf-8", errors="replace")[:1000]
+            except Exception as read_err:
+                log.debug(f"[NVIDIA] Failed to read error response body: {read_err}")
+
+            # Log full error details
             log.error(
-                f"Streaming chat HTTP error: {e.response.status_code} - {error_body}"
+                f"[NVIDIA] Streaming chat HTTP error: {e.response.status_code} - {error_body}"
             )
+            log.error(f"[NVIDIA] Request URL: {self.base_url}{endpoint}")
+            log.error(f"[NVIDIA] Request model: {request_data.get('model')}")
+            log.error(f"[NVIDIA] Response headers: {dict(e.response.headers)}")
+
             yield {
                 "type": "error",
                 "error": f"HTTP {e.response.status_code}: {error_body or str(e)}",
@@ -482,16 +491,21 @@ class OptimizedLLMClient:
 
         # Try different model identifiers if the simple one doesn't work
         model_identifier = self.model
-        if "/" not in model_identifier and not model_identifier.startswith(
-            "moonshotai/"
-        ):
-            # For Kimi models, try with provider prefix
+        model_to_use = model_identifier
+
+        # Validate model name format for NVIDIA API
+        # NVIDIA API expects format: "provider/model-name"
+        if "/" not in model_identifier:
+            # For Kimi models, add the provider prefix
             if "kimi" in model_identifier.lower():
                 model_to_use = f"moonshotai/{model_identifier}"
             else:
-                model_to_use = model_identifier
-        else:
-            model_to_use = model_identifier
+                # For other models, keep as-is but log warning
+                log.warning(
+                    f"[NVIDIA] Model '{model_identifier}' may not have correct format. Expected 'provider/model-name'"
+                )
+
+        log.debug(f"[NVIDIA] Using model: {model_to_use}")
 
         request_data = {
             "model": model_to_use,
@@ -546,9 +560,7 @@ class OptimizedLLMClient:
 
             # Handle tool calls in delta
             if "tool_calls" in delta:
-                return {
-                    "message": {"role": "assistant", "tool_calls": delta["tool_calls"]}
-                }
+                return {"message": {"role": "assistant", "tool_calls": delta["tool_calls"]}}
 
             # Handle content in delta
             if "content" in delta:
@@ -566,9 +578,7 @@ class OptimizedLLMClient:
                     }
 
             # Default case - return whatever is in the delta
-            return {
-                "message": {"role": "assistant", "content": delta.get("content", "")}
-            }
+            return {"message": {"role": "assistant", "content": delta.get("content", "")}}
 
         # Handle direct content (not in choices)
         if "content" in data:
@@ -604,9 +614,7 @@ class OptimizedLLMClient:
         """Parse Ollama API response"""
         return data
 
-    def _should_yield_chunk(
-        self, buffer: str, chunk_count: int, new_content: str
-    ) -> bool:
+    def _should_yield_chunk(self, buffer: str, chunk_count: int, new_content: str) -> bool:
         """Intelligent chunking decision based on content analysis"""
         buffer_length = len(buffer)
 
@@ -621,9 +629,7 @@ class OptimizedLLMClient:
         # For very short responses, yield more frequently
         if chunk_count < 3 and buffer_length >= 10:  # Lower threshold for early chunks
             return True
-        elif (
-            chunk_count < 10 and buffer_length >= 20
-        ):  # Medium threshold for middle chunks
+        elif chunk_count < 10 and buffer_length >= 20:  # Medium threshold for middle chunks
             return True
         elif buffer_length >= 30:  # Higher threshold for later chunks
             return True
@@ -664,9 +670,7 @@ class OptimizedLLMClient:
             recent_assistant = assistant_messages[-recent_pairs:]
 
             # If we have too many messages, summarize older ones
-            remaining_slots = max_context - sum(
-                len(msg.get("content", "")) for msg in optimized
-            )
+            remaining_slots = max_context - sum(len(msg.get("content", "")) for msg in optimized)
 
             if len(recent_user) > 0:
                 # Add recent messages
@@ -677,9 +681,7 @@ class OptimizedLLMClient:
 
                         if i < len(recent_assistant):
                             optimized.append(recent_assistant[i])
-                            remaining_slots -= len(
-                                recent_assistant[i].get("content", "")
-                            )
+                            remaining_slots -= len(recent_assistant[i].get("content", ""))
 
                 # If still have space, add older summarized context
                 if remaining_slots > 500 and len(user_messages) > recent_pairs:
@@ -703,9 +705,7 @@ class OptimizedLLMClient:
             log.warning(f"Context optimization failed: {e}")
             return messages  # Return original if optimization fails
 
-    def _generate_cache_key(
-        self, messages: list, system: str = None, tools: list = None
-    ) -> str:
+    def _generate_cache_key(self, messages: list, system: str = None, tools: list = None) -> str:
         """Generate cache key for response caching"""
         key_components = {
             "messages": [

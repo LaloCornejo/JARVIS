@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 from base64 import urlsafe_b64decode, urlsafe_b64encode
+from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Any
 
@@ -243,6 +245,37 @@ class GmailClient:
         )
         return result is not None
 
+    async def mark_as_unread(self, message_id: str) -> bool:
+        result = await self._request(
+            "POST",
+            f"/users/me/messages/{message_id}/modify",
+            json={"addLabelIds": ["UNREAD"]},
+        )
+        return result is not None
+
+    async def archive_message(self, message_id: str) -> bool:
+        result = await self._request(
+            "POST",
+            f"/users/me/messages/{message_id}/modify",
+            json={"removeLabelIds": ["INBOX"]},
+        )
+        return result is not None
+
+    async def star_message(self, message_id: str, unstar: bool = False) -> bool:
+        if unstar:
+            result = await self._request(
+                "POST",
+                f"/users/me/messages/{message_id}/modify",
+                json={"removeLabelIds": ["STARRED"]},
+            )
+        else:
+            result = await self._request(
+                "POST",
+                f"/users/me/messages/{message_id}/modify",
+                json={"addLabelIds": ["STARRED"]},
+            )
+        return result is not None
+
     async def trash_message(self, message_id: str) -> bool:
         result = await self._request("POST", f"/users/me/messages/{message_id}/trash")
         return result is not None
@@ -377,5 +410,184 @@ class GmailMarkReadTool(BaseTool):
             if success:
                 return ToolResult(success=True, data="Marked as read")
             return ToolResult(success=False, data=None, error="Failed")
+        except Exception as e:
+            return ToolResult(success=False, data=None, error=str(e))
+
+
+class GmailMarkUnreadTool(BaseTool):
+    name = "gmail_mark_unread"
+    description = "Mark an email as unread"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "message_id": {"type": "string", "description": "Email message ID"},
+        },
+        "required": ["message_id"],
+    }
+
+    async def execute(self, message_id: str) -> ToolResult:
+        client = get_gmail_client()
+        if not client.access_token:
+            return ToolResult(success=False, data=None, error="Gmail not authenticated")
+
+        try:
+            result = await client._request(
+                "POST",
+                f"/users/me/messages/{message_id}/modify",
+                json={"addLabelIds": ["UNREAD"]},
+            )
+            if result is not None:
+                return ToolResult(success=True, data="Marked as unread")
+            return ToolResult(success=False, data=None, error="Failed")
+        except Exception as e:
+            return ToolResult(success=False, data=None, error=str(e))
+
+
+class GmailDeleteTool(BaseTool):
+    name = "gmail_delete"
+    description = "Move an email to trash"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "message_id": {"type": "string", "description": "Email message ID"},
+        },
+        "required": ["message_id"],
+    }
+
+    async def execute(self, message_id: str) -> ToolResult:
+        client = get_gmail_client()
+        if not client.access_token:
+            return ToolResult(success=False, data=None, error="Gmail not authenticated")
+
+        try:
+            success = await client.trash_message(message_id)
+            if success:
+                return ToolResult(success=True, data="Moved to trash")
+            return ToolResult(success=False, data=None, error="Failed")
+        except Exception as e:
+            return ToolResult(success=False, data=None, error=str(e))
+
+
+class GmailArchiveTool(BaseTool):
+    name = "gmail_archive"
+    description = "Archive an email (remove from inbox)"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "message_id": {"type": "string", "description": "Email message ID"},
+        },
+        "required": ["message_id"],
+    }
+
+    async def execute(self, message_id: str) -> ToolResult:
+        client = get_gmail_client()
+        if not client.access_token:
+            return ToolResult(success=False, data=None, error="Gmail not authenticated")
+
+        try:
+            result = await client._request(
+                "POST",
+                f"/users/me/messages/{message_id}/modify",
+                json={"removeLabelIds": ["INBOX"]},
+            )
+            if result is not None:
+                return ToolResult(success=True, data="Archived")
+            return ToolResult(success=False, data=None, error="Failed")
+        except Exception as e:
+            return ToolResult(success=False, data=None, error=str(e))
+
+
+class GmailStarTool(BaseTool):
+    name = "gmail_star"
+    description = "Star an email"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "message_id": {"type": "string", "description": "Email message ID"},
+            "unstar": {
+                "type": "boolean",
+                "description": "Remove star instead of adding",
+                "default": False,
+            },
+        },
+        "required": ["message_id"],
+    }
+
+    async def execute(self, message_id: str, unstar: bool = False) -> ToolResult:
+        client = get_gmail_client()
+        if not client.access_token:
+            return ToolResult(success=False, data=None, error="Gmail not authenticated")
+
+        try:
+            if unstar:
+                result = await client._request(
+                    "POST",
+                    f"/users/me/messages/{message_id}/modify",
+                    json={"removeLabelIds": ["STARRED"]},
+                )
+                msg = "Unstarred"
+            else:
+                result = await client._request(
+                    "POST",
+                    f"/users/me/messages/{message_id}/modify",
+                    json={"addLabelIds": ["STARRED"]},
+                )
+                msg = "Starred"
+            if result is not None:
+                return ToolResult(success=True, data=msg)
+            return ToolResult(success=False, data=None, error="Failed")
+        except Exception as e:
+            return ToolResult(success=False, data=None, error=str(e))
+
+
+class GmailReplyTool(BaseTool):
+    name = "gmail_reply"
+    description = "Reply to an email"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "message_id": {"type": "string", "description": "Email message ID to reply to"},
+            "body": {"type": "string", "description": "Reply body text"},
+        },
+        "required": ["message_id", "body"],
+    }
+
+    async def execute(self, message_id: str, body: str) -> ToolResult:
+        client = get_gmail_client()
+        if not client.access_token:
+            return ToolResult(success=False, data=None, error="Gmail not authenticated")
+
+        try:
+            # Get original message for thread_id and headers
+            original = await client.get_message(message_id)
+            if not original:
+                return ToolResult(success=False, data=None, error="Original message not found")
+
+            thread_id = original.get("thread_id")
+            to = original.get("from", "")
+            subject = original.get("subject", "")
+            if not subject.startswith("Re:"):
+                subject = f"Re: {subject}"
+
+            # Build reply message
+            msg = MIMEText(body)
+            msg["To"] = to
+            msg["Subject"] = subject
+            msg["In-Reply-To"] = message_id
+            msg["References"] = message_id
+
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+
+            result = await client._request(
+                "POST",
+                "/users/me/messages/send",
+                json={"raw": raw, "threadId": thread_id},
+            )
+            if result:
+                return ToolResult(
+                    success=True,
+                    data={"message_id": result.get("id"), "status": "sent"},
+                )
+            return ToolResult(success=False, data=None, error="Failed to send reply")
         except Exception as e:
             return ToolResult(success=False, data=None, error=str(e))

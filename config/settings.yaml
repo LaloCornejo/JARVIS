@@ -1,15 +1,15 @@
 jarvis:
   name: "JARVIS"
   wake_word: "hey jarvis"
-  timezone: "America/Mexico_City"  # Your local timezone
+  timezone: "America/Mexico_City"
 
 llm:
-  backend: nvidia  # Changed default to nvidia
-  api_url: https://integrate.api.nvidia.com/v1  # NVIDIA API endpoint
-  api_key_env: NVIDIA_API_KEY  # Environment variable for API key
-  primary_model: moonshotai/kimi-k2.5  # Changed default to correct model name with provider prefix
-  fast_model: moonshotai/kimi-k2.5  # Changed default to correct model name with provider prefix
-  fallback_model: moonshotai/kimi-k2.5  # Changed default to correct model name with provider prefix
+  backend: nvidia
+  api_url: https://integrate.api.nvidia.com/v1
+  api_key_env: NVIDIA_API_KEY
+  primary_model: moonshotai/kimi-k2.5
+  fast_model: moonshotai/kimi-k2.5
+  fallback_model: moonshotai/kimi-k2.5
   temperature: 0.7
   stream: true
 
@@ -27,13 +27,13 @@ ollama:
   fast_model: qwen3:1.7b
   preload: true
 
-nvidia:  # Added NVIDIA API configuration
-  api_url: https://integrate.api.nvidia.com/v1  # This is correct based on documentation
+nvidia:
+  api_url: https://integrate.api.nvidia.com/v1
   api_key_env: NVIDIA_API_KEY
-  default_model: moonshotai/kimi-k2.5  # Using the full model identifier with provider prefix
+  default_model: moonshotai/kimi-k2.5
   models:
     - kimi-k2.5
-    - moonshotai/kimi-k2.5  # Try with the provider prefix
+    - moonshotai/kimi-k2.5
     - moonshotai/kimi-k2-instruct
     - llama3-chatqa-1.5
     - mistral-large
@@ -50,7 +50,7 @@ voice_input:
   compute_type: float16
   vad: silero
   silence_duration: 0.5
-  input_device: null # Use default device
+  input_device: null
 
 tts:
   engine: xtts
@@ -65,15 +65,62 @@ browser:
 
 tools:
   enabled:
-    - web_search
+    # Core System
+    - system
     - time
-    - memory
-    - file_search
     - system_control
-  require_approval:
-    - file_modify
-    - system_settings
     - terminal
+    # File Operations (MCP)
+    - file_search
+    - file_modify
+    - mcp_filesystem
+    # Web & Search
+    - web
+    - web_search
+    - youtube
+    # Communication
+    - email
+    - discord
+    - telegram
+    - whatsapp
+    # Development
+    - code
+    - github
+    - docker
+    - mcp_github_mcp
+    # Media & Entertainment
+    - music
+    - spotify
+    - vlc
+    # Productivity
+    - calendar
+    - notes
+    - clipboard
+    - screenshot
+    - screentime
+    # Memory & Knowledge
+    - memory
+    - mcp_memory
+    - episodic_memory
+    # MCP Servers
+    - mcp
+    - browser
+    - mcp_browser
+    - sequential_thinking
+    - mcp_sequential_thinking
+    - mcp_sqlite
+    - mcp_search
+    - mcp_exa
+    - mcp_context7
+    - mcp_fetch
+    # Advanced Features
+    - performance
+    - agents
+    - workflows
+    - users
+    - predictions
+  require_approval:
+    - system_settings
 
 memory:
   vector_db: lancedb
@@ -89,80 +136,82 @@ security:
     - grep
     - python
 
-# MCP (Model Context Protocol) Configuration
 mcp:
   enabled: true
   auto_connect: true
-  
+
   servers:
-    # Tier 1: Essential (Official MCP Servers)
     filesystem:
       enabled: true
       command: npx
       args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
       env: {}
-    
+
     fetch:
       enabled: true
-      command: npx
-      args: ["-y", "@modelcontextprotocol/server-fetch"]
+      command: uvx
+      args: ["mcp-server-fetch"]
       env: {}
-    
+
     github:
-      enabled: false  # Requires GITHUB_PERSONAL_ACCESS_TOKEN
+      enabled: true
       command: npx
       args: ["-y", "@modelcontextprotocol/server-github"]
       env:
-        GITHUB_PERSONAL_ACCESS_TOKEN: ""  # Set via env var
-    
+        GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+
     sequentialthinking:
       enabled: true
       command: npx
-      args: ["-y", "@modelcontextprotocol/server-sequentialthinking"]
+      args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
       env: {}
-    
+
     memory:
       enabled: true
       command: npx
       args: ["-y", "@modelcontextprotocol/server-memory"]
       env: {}
-    
-    # Tier 2: Highly Valuable
+
     sqlite:
       enabled: true
-      command: npx
-      args: ["-y", "@modelcontextprotocol/server-sqlite", "./data/jarvis.db"]
+      command: uvx
+      args: ["mcp-server-sqlite", "--db-path", "./data/jarvis.db"]
       env: {}
-    
+
     redis:
-      enabled: false  # Requires Redis server running
+      enabled: false
       command: npx
       args: ["-y", "@modelcontextprotocol/server-redis"]
       env:
         REDIS_URL: "redis://localhost:6379"
-    
+
     playwright:
       enabled: true
       command: npx
-      args: ["-y", "@anthropic-ai/mcp-playwright"]
+      args:
+        - "-y"
+        - "@playwright/mcp@latest"
+        - "--browser"
+        - "firefox"
+        - "--user-data-dir"
+        - "C:\\Users\\Lalo\\AppData\\Roaming\\zen\\Profiles\\9zb7xjm1.Default (release)"
       env: {}
-    
-    # Third-party/community servers
+
     context7:
       enabled: true
       command: npx
       args: ["-y", "@upstash/context7-mcp"]
       env: {}
-    
+
     exa:
-      enabled: false  # Requires EXA_API_KEY
+      enabled: true
       command: npx
-      args: ["-y", "@exa-labs/mcp"]
+      args: ["-y", "exa-mcp-server"]
       env:
-        EXA_API_KEY: ""  # Set via env var
-    
+        EXA_API_KEY: ${EXA_API_KEY}
+
     browserbase:
-      enabled: false  # Requires BROWSERBASE_API_KEY
+      enabled: false
       command: npx
       args: ["-y", "@browserbasehq/mcp-server-browserbase"]
       env:

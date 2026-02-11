@@ -6,10 +6,14 @@ import yaml
 
 
 class Config:
+    DEFAULT_CONFIG_PATH = "config/settings.yaml"
+
     def __init__(self, config_path: str | Path | None = None):
         self._data: dict = {}
         if config_path:
             self.load(config_path)
+        else:
+            self.load(self.DEFAULT_CONFIG_PATH)
 
     def load(self, path: str | Path) -> None:
         path = Path(path)
@@ -32,40 +36,34 @@ class Config:
     @property
     def llm_url(self) -> str:
         backend = self.get("llm.backend", "nvidia")  # Changed default to nvidia
-        if backend == "nvidia":
-            return self.get("nvidia.api_url", "https://integrate.api.nvidia.com/v1")
-        elif backend == "ollama":
-            return self.get("ollama.api_url", "http://localhost:11434")
-        else:
-            return self.get("llm.api_url", "https://integrate.api.nvidia.com/v1")
+        # if backend == "nvidia":
+        #     return self.get("nvidia.api_url", "https://integrate.api.nvidia.com/v1")
+        # elif backend == "ollama":
+        return self.get("ollama.api_url", "http://localhost:11434")
+        # else:
+        #     return self.get("llm.api_url", "https://integrate.api.nvidia.com/v1")
 
     @property
     def llm_model(self) -> str:
-        backend = self.get("llm.backend", "nvidia")  # Changed default to nvidia
+        backend = self.get("llm.backend", "nvidia")
         if backend == "nvidia":
-            return self.get(
-                "llm.primary_model", "moonshotai/kimi-k2.5"
-            )  # Changed default to correct model name
+            return self.get("llm.primary_model", "moonshotai/kimi-k2.5")
         elif backend == "ollama":
             return self.get("llm.primary_model", "qwen3:1.7b")
         else:
-            return self.get(
-                "llm.primary_model", "moonshotai/kimi-k2.5"
-            )  # Changed default to correct model name
+            return self.get("llm.primary_model", "moonshotai/kimi-k2.5")
 
     @property
     def llm_vision_model(self) -> str:
-        backend = self.get("llm.backend", "nvidia")  # Changed default to nvidia
-        if backend == "nvidia":
-            return self.get(
-                "llm.vision_model", "moonshotai/kimi-k2.5"
-            )  # Changed default to correct model name
-        elif backend == "ollama":
-            return self.get("llm.vision_model", "huihui_ai/qwen3-vl-abliterated:8b-instruct ")
-        else:
-            return self.get(
-                "llm.vision_model", "moonshotai/kimi-k2.5"
-            )  # Changed default to correct model name
+        backend = self.get("llm.backend", "nvidia")
+        # if backend == "nvidia":
+        #     return self.get("llm.vision_model", "moonshotai/kimi-k2.5")
+        # elif backend == "ollama":
+        return self.get(
+            "llm.vision_model", "huihui_ai/qwen3-vl-abliterated:8b-instruct "
+        )
+        # else:
+        #     return self.get("llm.vision_model", "moonshotai/kimi-k2.5")
 
     def llm_fast_model(self) -> str:
         backend = self.get("llm.backend", "nvidia")  # Changed default to nvidia

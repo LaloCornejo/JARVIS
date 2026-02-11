@@ -193,10 +193,58 @@ class LaunchAppTool(BaseTool):
         "required": ["app_name"],
     }
 
+    # Special app handlers for apps that need specific launch commands
+    SPECIAL_APPS = {
+        "windows": {
+            "apple music": {"cmd": "start applemusic:", "shell": True},
+            "applemusic": {"cmd": "start applemusic:", "shell": True},
+            "music": {"cmd": "start applemusic:", "shell": True},  # Alias
+        },
+        "darwin": {
+            "apple music": {"cmd": ["open", "-a", "Music"], "shell": False},
+            "applemusic": {"cmd": ["open", "-a", "Music"], "shell": False},
+            "music": {"cmd": ["open", "-a", "Music"], "shell": False},
+        },
+    }
+
     async def execute(self, app_name: str) -> ToolResult:
         try:
             system = platform.system().lower()
+            query_lower = app_name.lower().strip()
 
+            # Check for special app handlers first
+            special_apps = self.SPECIAL_APPS.get(system, {})
+            if query_lower in special_apps:
+                handler = special_apps[query_lower]
+                cmd = handler["cmd"]
+                use_shell = handler.get("shell", False)
+
+                if isinstance(cmd, list):
+                    subprocess.Popen(
+                        cmd,
+                        shell=use_shell,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                else:
+                    subprocess.Popen(
+                        cmd,
+                        shell=use_shell,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+
+                return ToolResult(
+                    success=True,
+                    data={
+                        "app": app_name,
+                        "resolved": query_lower,
+                        "command": cmd,
+                        "status": "launched",
+                    },
+                )
+
+            # Try to find app in registry
             match = find_app(app_name)
             if match:
                 app_key, cmd = match

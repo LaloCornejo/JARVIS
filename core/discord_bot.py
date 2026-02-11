@@ -33,6 +33,18 @@ from typing import TYPE_CHECKING, Any, Callable
 import httpx
 import websockets
 
+# Import voice receive functionality
+try:
+    from discord.ext import voice_recv
+
+    HAS_VOICE_RECV = True
+except ImportError:
+    HAS_VOICE_RECV = False
+    voice_recv = None
+
+# Import STT functionality
+from core.voice.stt import OptimizedSpeechToText
+
 # Reduce websocket logging verbosity
 logging.getLogger("websockets").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
@@ -58,6 +70,8 @@ class DiscordSession:
     messages: list[dict] = field(default_factory=list)
     last_activity: datetime = field(default_factory=datetime.now)
     max_messages: int = 25
+    voice_client: Any | None = None  # Voice client for voice channels
+    voice_sink: Any | None = None  # Audio sink for voice receiving
 
     def add_message(self, role: str, content: str, **kwargs) -> None:
         """Add a message to the conversation history."""
@@ -152,6 +166,12 @@ class DiscordBotHandler:
         # Sessions
         self._sessions: dict[str, DiscordSession] = {}
 
+        # Voice clients
+        self._voice_clients: dict[str, Any] = {}  # guild_id -> voice_client
+
+        # STT for voice processing (will be initialized when event loop is available)
+        self._stt = None
+
         # HTTP client
         self._http_client: httpx.AsyncClient | None = None
 
@@ -161,6 +181,10 @@ class DiscordBotHandler:
             "!help": self._handle_help,
             "!status": self._handle_status,
             "!clear": self._handle_clear,
+            "!join": self._handle_join_voice,
+            "!leave": self._handle_leave_voice,
+            "!listen": self._handle_listen_voice,
+            "!test-voice": self._handle_test_voice,
         }
 
     async def start(self, jarvis_server: "JarvisServer | None" = None) -> bool:
@@ -168,9 +192,6 @@ class DiscordBotHandler:
         if self._running:
             log.warning("[DISCORD] Handler already running")
             return True
-
-        if jarvis_server:
-            self.jarvis = jarvis_server
 
         # Load token when needed
         if not self.token:
@@ -201,7 +222,21 @@ class DiscordBotHandler:
             log.error(f"[DISCORD] Error connecting to Discord: {e}")
             return False
 
-        # Start WebSocket connection
+        # Initialize STT now that we have an event loop
+        if self._stt is None:
+            try:
+                self._stt = OptimizedSpeechToText(
+                    model_size="base.en",
+                    device="cpu",  # Use CPU for compatibility
+                    compute_type="int8",
+                    preload=True,
+                )
+                log.info("[DISCORD] STT initialized successfully")
+            except Exception as e:
+                log.error(f"[DISCORD] Failed to initialize STT: {e}")
+                self._stt = None
+
+        self.jarvis = jarvis_server
         self._running = True
         self._ws_task = asyncio.create_task(self._websocket_loop())
         log.info("[DISCORD] Handler started")
@@ -404,7 +439,7 @@ class DiscordBotHandler:
             "op": 2,
             "d": {
                 "token": self.token,
-                "intents": 33280,  # GUILD_MESSAGES (512) + MESSAGE_CONTENT (32768)
+                "intents": 33409,  # GUILDS (1) + GUILD_MESSAGES (512) + GUILD_VOICE_STATES (128) + MESSAGE_CONTENT (32768)
                 "properties": {
                     "os": "linux",
                     "browser": "JARVIS",
@@ -447,6 +482,39 @@ class DiscordBotHandler:
 
         elif event_type == "RESUMED":
             log.info("[DISCORD] Session resumed")
+
+        elif event_type == "VOICE_STATE_UPDATE":
+            await self._handle_voice_state_update(data)
+
+        elif event_type == "VOICE_SERVER_UPDATE":
+            await self._handle_voice_server_update(data)
+
+    async def _handle_voice_state_update(self, data: dict) -> None:
+        """Handle voice state update events."""
+        user_id = data.get("user", {}).get("id")
+        guild_id = data.get("guild_id")
+        channel_id = data.get("channel_id")
+
+        # If this is about our bot, update our voice client tracking
+        if user_id == self._bot_user_id:
+            log.info(f"[DISCORD] Voice state updated - Guild: {guild_id}, Channel: {channel_id}")
+            if guild_id:
+                if channel_id:
+                    # Joined/moved to a voice channel
+                    log.info(f"[DISCORD] Bot joined voice channel {channel_id} in guild {guild_id}")
+                else:
+                    # Left a voice channel
+                    if guild_id in self._voice_clients:
+                        del self._voice_clients[guild_id]
+                    log.info(f"[DISCORD] Bot left voice channel in guild {guild_id}")
+
+    async def _handle_voice_server_update(self, data: dict) -> None:
+        """Handle voice server update events."""
+        guild_id = data.get("guild_id")
+        endpoint = data.get("endpoint")
+        token = data.get("token")
+
+        log.info(f"[DISCORD] Voice server update - Guild: {guild_id}, Endpoint: {endpoint}")
 
     async def _handle_message_create(self, data: dict) -> None:
         """Handle incoming message."""
@@ -840,6 +908,53 @@ class DiscordBotHandler:
             log.info(f"[DISCORD] New session created for channel: {channel_id}")
         return self._sessions[channel_id]
 
+    async def _get_voice_state(self, guild_id: str) -> dict | None:
+        """Get voice state for a guild."""
+        if not self._http_client:
+            log.error("[DISCORD] No HTTP client available for voice state retrieval")
+            return None
+
+        try:
+            # Try to get the bot's voice state in the guild
+            response = await self._http_client.get(
+                f"{self.API_URL}/guilds/{guild_id}/voice-states/@me"
+            )
+            log.debug(f"[DISCORD] Voice state response status: {response.status_code}")
+            if response.status_code == 200:
+                voice_state = response.json()
+                log.debug(f"[DISCORD] Voice state: {voice_state}")
+                return voice_state
+            else:
+                log.debug(f"[DISCORD] Failed to get voice state: {response.status_code}")
+                log.debug(f"[DISCORD] Response text: {response.text}")
+        except Exception as e:
+            log.debug(f"[DISCORD] Exception getting voice state: {e}")
+        return None
+
+    async def _update_voice_state(self, guild_id: str, channel_id: str | None) -> bool:
+        """Update voice state for a guild through Gateway."""
+        if not self._websocket:
+            log.error("[DISCORD] No WebSocket connection available for voice state update")
+            return False
+
+        try:
+            payload = {
+                "op": 4,  # VOICE_STATE_UPDATE opcode
+                "d": {
+                    "guild_id": guild_id,
+                    "channel_id": channel_id,
+                    "self_mute": False,
+                    "self_deaf": False,
+                },
+            }
+            log.debug(f"[DISCORD] Sending voice state update: {payload}")
+            await self._websocket.send(json.dumps(payload))
+            log.debug("[DISCORD] Voice state update sent successfully")
+            return True
+        except Exception as e:
+            log.error(f"[DISCORD] Failed to send voice state update: {e}")
+            return False
+
     # Command Handlers
 
     async def _handle_help(self, session: DiscordSession, message_data: dict, text: str) -> None:
@@ -862,6 +977,13 @@ Just send me a message and I'll respond! I can:
 `!jarvis` or `!help` - Show this help
 `!status` - Check bot status
 `!clear` - Clear conversation history
+`!join [channel_id]` - Join a voice channel (requires channel ID - right-click channel → Copy ID)
+`!leave` - Leave current voice channel
+`!listen` - Listen to voice channel (voice commands)
+`!test-voice` - Test voice functionality
+
+**Voice Features (Partially Implemented):**
+Voice commands are in development. The bot can join voice channels but full voice receiving requires additional integration.
 
 Your messages are processed through JARVIS AI."""
         await self._send_message(session.channel_id, help_text)
@@ -887,8 +1009,190 @@ Your messages are processed through JARVIS AI."""
         session.messages.clear()
         await self._send_message(session.channel_id, "🗑️ Conversation history cleared!")
 
+    async def _handle_join_voice(
+        self, session: DiscordSession, message_data: dict, text: str
+    ) -> None:
+        """Handle join voice channel command."""
+        guild_id = session.guild_id
+        if not guild_id:
+            await self._send_message(session.channel_id, "❌ This command only works in guilds.")
+            return
 
-# Global handler instance
+        # Parse channel ID from command (if provided)
+        parts = text.split()
+        channel_id = None
+        if len(parts) > 1:
+            channel_id = parts[1]
+            log.debug(f"[DISCORD] Channel ID provided in command: {channel_id}")
+
+        # If no channel ID provided, give clear instructions
+        if not channel_id:
+            await self._send_message(
+                session.channel_id,
+                "🔊 **How to Join a Voice Channel**\n\n"
+                "**Method 1 - Use Channel ID (Recommended):**\n"
+                "1. Enable Developer Mode in Discord (Settings → Advanced → Developer Mode)\n"
+                "2. Right-click on the voice channel you want to join\n"
+                "3. Click 'Copy ID'\n"
+                "4. Use the command: `!join [channel_id]`\n\n"
+                "**Method 2 - Manual Join:**\n"
+                "1. Manually drag the bot to a voice channel in Discord\n"
+                "2. The bot will automatically detect when it's moved to a voice channel\n\n"
+                "**Note:** Automatic detection of your current voice channel is limited due to Discord API restrictions.",
+            )
+            return
+
+        # Try to join the voice channel using voice state update
+        success = await self._update_voice_state(guild_id, channel_id)
+        if success:
+            await self._send_message(session.channel_id, f"🔊 Joined voice channel <#{channel_id}>")
+        else:
+            await self._send_message(
+                session.channel_id,
+                f"❌ Failed to join voice channel <#{channel_id}>. Please check:\n"
+                "• The channel ID is correct\n"
+                "• The channel exists and is a voice channel\n"
+                "• The bot has permission to join the channel\n"
+                "• The channel is not full",
+            )
+
+    async def _handle_leave_voice(
+        self, session: DiscordSession, message_data: dict, text: str
+    ) -> None:
+        """Handle leave voice channel command."""
+        guild_id = session.guild_id
+        if not guild_id:
+            await self._send_message(session.channel_id, "❌ This command only works in guilds.")
+            return
+
+        # Send voice state update with null channel_id to disconnect
+        success = await self._update_voice_state(guild_id, None)
+        if success:
+            await self._send_message(session.channel_id, "🔇 Left voice channel")
+        else:
+            await self._send_message(
+                session.channel_id,
+                "❌ Failed to leave voice channel. There may be a connection issue.",
+            )
+
+    async def _handle_listen_voice(
+        self, session: DiscordSession, message_data: dict, text: str
+    ) -> None:
+        """Handle listen to voice channel command."""
+        guild_id = session.guild_id
+        if not guild_id:
+            await self._send_message(session.channel_id, "❌ This command only works in guilds.")
+            return
+
+        # Check if we're in a voice channel
+        voice_state = await self._get_voice_state(guild_id)
+        if not voice_state or not voice_state.get("channel_id"):
+            await self._send_message(
+                session.channel_id, "❌ Not in a voice channel. Use !join first."
+            )
+            return
+
+        # In a full implementation, we would start listening to voice data here
+        # For now, we'll just send a message indicating the feature is in development
+        await self._send_message(
+            session.channel_id, "👂 Listening to voice channel... (feature in development)"
+        )
+
+        # If we had discord-ext-voice-recv properly integrated, we would do something like:
+        # vc = await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
+        # vc.listen(voice_recv.BasicSink(self._handle_voice_data))
+
+    async def _handle_test_voice(
+        self, session: DiscordSession, message_data: dict, text: str
+    ) -> None:
+        """Test voice functionality."""
+        # Check if STT is available
+        if self._stt is None:
+            await self._send_message(session.channel_id, "❌ STT is not available")
+            return
+
+        # Test STT functionality
+        try:
+            # Create a simple test audio (silence)
+            import numpy as np
+
+            test_audio = np.zeros(16000, dtype=np.float32)  # 1 second of silence
+
+            # Test transcription
+            transcription = await self._stt.transcribe_async(test_audio)
+
+            if HAS_VOICE_RECV:
+                status = "✅ discord-ext-voice-recv is available"
+            else:
+                status = "⚠️ discord-ext-voice-recv is not available (install with: pip install discord-ext-voice-recv)"
+
+            response = f"""🔊 **Voice Functionality Test**
+            
+{status}
+STT Model: Loaded
+Test Transcription: "{transcription or "(silent)"}"
+
+**Voice Commands:**
+`!join [channel_id]` - Join a voice channel
+`!leave` - Leave current voice channel
+`!listen` - Listen to voice channel (voice commands)
+
+Voice functionality is partially implemented. Full voice receiving requires discord-ext-voice-recv integration."""
+
+            await self._send_message(session.channel_id, response)
+        except Exception as e:
+            await self._send_message(session.channel_id, f"❌ Voice test failed: {e}")
+
+    async def _process_voice_command(
+        self, guild_id: str, channel_id: str, user_id: str, audio_data: bytes
+    ) -> None:
+        """Process voice command from a user in a voice channel."""
+        # Check if STT is available
+        if self._stt is None:
+            log.error("[DISCORD] STT is not available for voice command processing")
+            return
+
+        try:
+            log.info(f"[DISCORD] Processing voice command from user {user_id} in guild {guild_id}")
+
+            # Convert audio data to text using STT
+            import numpy as np
+
+            # Convert bytes to numpy array (assuming 16-bit PCM at 48kHz)
+            # This is a simplified conversion - in reality, we'd need to handle the actual audio format
+            audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+
+            # Transcribe the audio
+            transcription = await self._stt.transcribe_async(audio_array)
+
+            if transcription and transcription.strip():
+                log.info(f"[DISCORD] Transcribed voice command: {transcription}")
+
+                # Get or create session for this channel
+                session = self._get_or_create_session(
+                    channel_id=channel_id,
+                    guild_id=guild_id,
+                    user_id=user_id,
+                )
+
+                # Add transcription to session messages
+                session.add_message("user", transcription)
+
+                # Process through JARVIS if available
+                if self.jarvis:
+                    await self._process_message_through_jarvis(
+                        session, transcription, channel_id, None
+                    )
+                else:
+                    # Fallback response if JARVIS is not available
+                    await self._send_message(channel_id, f"I heard: {transcription}")
+            else:
+                log.info("[DISCORD] No transcription from voice command")
+
+        except Exception as e:
+            log.error(f"[DISCORD] Error processing voice command: {e}")
+
+
 discord_bot_handler = DiscordBotHandler()
 
 

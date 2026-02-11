@@ -54,7 +54,11 @@ class MCPToolBridge(BaseTool):
             if "required" in self._input_schema:
                 schema["parameters"]["required"] = self._input_schema["required"]
 
-        return schema
+        # Return OpenAI function format for NVIDIA API compatibility
+        return {
+            "type": "function",
+            "function": schema,
+        }
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         """Execute the MCP tool."""

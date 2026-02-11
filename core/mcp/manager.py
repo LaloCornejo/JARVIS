@@ -63,6 +63,23 @@ class MCPManager:
         self.clients: dict[str, MCPClient] = {}
         self._config_key = "mcp.servers"
 
+    def _expand_env_vars(self, value: Any) -> Any:
+        """Expand environment variables in config values."""
+        if isinstance(value, str):
+            import os
+            import re
+
+            def replace_var(match):
+                var_name = match.group(1)
+                return os.environ.get(var_name, match.group(0))
+
+            return re.sub(r"\$\{([^}]+)\}", replace_var, value)
+        elif isinstance(value, dict):
+            return {k: self._expand_env_vars(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [self._expand_env_vars(v) for v in value]
+        return value
+
     def _get_server_configs(self) -> dict[str, dict[str, Any]]:
         """Get server configs from settings or use defaults."""
         user_configs = self.config.get(self._config_key, {})
@@ -74,6 +91,10 @@ class MCPManager:
                 configs[name].update(config)
             else:
                 configs[name] = config
+
+        # Expand environment variables in configs
+        for name, config in configs.items():
+            configs[name] = self._expand_env_vars(config)
 
         return configs
 

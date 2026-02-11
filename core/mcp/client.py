@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import subprocess
-from contextlib import AsyncExitStack
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 from mcp.types import CallToolResult
 
 log = logging.getLogger("jarvis.mcp.client")
@@ -29,7 +27,7 @@ class MCPClient:
         self.args = args or []
         self.env = env
         self.session: ClientSession | None = None
-        self._exit_stack = AsyncExitStack()
+        self._client = None
         self._tools: list[dict[str, Any]] = []
 
     async def connect(self) -> bool:
@@ -41,26 +39,10 @@ class MCPClient:
                 env=self.env,
             )
 
-            stdio_transport = await self._exit_stack.enter_async_context(
-                asyncio.create_subprocess_exec(
-                    server_params.command,
-                    *server_params.args,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    env={**dict(subprocess.os.environ), **(server_params.env or {})},
-                )
-            )
+            self._client = stdio_client(server_params)
+            read_stream, write_stream = await self._client.__aenter__()
 
-            stdio = await self._exit_stack.enter_async_context(stdio_transport)
-
-            read_stream = stdio.stdout
-            write_stream = stdio.stdin
-
-            self.session = await self._exit_stack.enter_async_context(
-                ClientSession(read_stream, write_stream)
-            )
-
+            self.session = await ClientSession(read_stream, write_stream).__aenter__()
             await self.session.initialize()
 
             # Discover available tools
@@ -84,8 +66,20 @@ class MCPClient:
 
     async def disconnect(self) -> None:
         """Disconnect from the MCP server."""
-        await self._exit_stack.aclose()
-        self.session = None
+        if self.session:
+            try:
+                await self.session.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self.session = None
+
+        if self._client:
+            try:
+                await self._client.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._client = None
+
         self._tools = []
         log.info(f"Disconnected from MCP server '{self.name}'")
 

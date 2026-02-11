@@ -40,9 +40,7 @@ class JarvisServer:
         backend = self.config.get("llm.backend", "nvidia")
         if backend == "nvidia":
             model = self.config.get("nvidia.default_model", "moonshotai/kimi-k2.5")
-            base_url = self.config.get(
-                "nvidia.api_url", "https://integrate.api.nvidia.com/v1"
-            )
+            base_url = self.config.get("nvidia.api_url", "https://integrate.api.nvidia.com/v1")
             api_key_env = self.config.get("nvidia.api_key_env", "NVIDIA_API_KEY")
         else:
             model = self.config.llm_model
@@ -102,9 +100,7 @@ class JarvisServer:
             performance_monitor.record_cache_hit("intent", True)
             self.messages.append({"role": "assistant", "content": cached_response})
             await streaming_interface.push_assistant_message(cached_response)
-            await conversation_buffer.add_message(
-                {"role": "assistant", "content": cached_response}
-            )
+            await conversation_buffer.add_message({"role": "assistant", "content": cached_response})
             if broadcast_func:
                 await broadcast_func(
                     {
@@ -125,20 +121,14 @@ class JarvisServer:
         start_time = asyncio.get_event_loop().time()
         chunk_count = 0
 
-        async for chunk in client.chat(
-            messages=self.messages, system=SYSTEM_PROMPT, tools=schemas
-        ):
+        async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT, tools=schemas):
             chunk_count += 1
             if msg := chunk.get("message", {}):
                 if content := msg.get("content"):
-                    log.warning(
-                        f"[SERVER] Got content chunk {chunk_count}: {len(content)} chars"
-                    )
+                    log.warning(f"[SERVER] Got content chunk {chunk_count}: {len(content)} chars")
                     full_response += content
                     if broadcast_func:
-                        await broadcast_func(
-                            {"type": "streaming_chunk", "content": content}
-                        )
+                        await broadcast_func({"type": "streaming_chunk", "content": content})
             if calls := msg.get("tool_calls"):
                 log.warning(
                     f"[SERVER] Found {len(calls)} tool calls in message chunk {chunk_count}"
@@ -147,12 +137,8 @@ class JarvisServer:
             # Handle tool_calls directly from optimized_client (type: "tool_calls")
             elif chunk.get("type") == "tool_calls" and chunk.get("tool_calls"):
                 calls = chunk["tool_calls"]
-                log.warning(
-                    f"[SERVER] Found {len(calls)} tool calls in SSE chunk {chunk_count}"
-                )
-                self._accumulate_tool_calls(
-                    calls, tool_calls, chunk_count, source="sse"
-                )
+                log.warning(f"[SERVER] Found {len(calls)} tool calls in SSE chunk {chunk_count}")
+                self._accumulate_tool_calls(calls, tool_calls, chunk_count, source="sse")
             # Handle direct content chunks (not wrapped in message)
             elif content := chunk.get("content"):
                 log.warning(
@@ -160,9 +146,7 @@ class JarvisServer:
                 )
                 full_response += content
                 if broadcast_func:
-                    await broadcast_func(
-                        {"type": "streaming_chunk", "content": content}
-                    )
+                    await broadcast_func({"type": "streaming_chunk", "content": content})
 
         log.warning(
             f"[SERVER] Chat stream ended after {chunk_count} chunks, "
@@ -175,9 +159,7 @@ class JarvisServer:
         if not tool_calls and full_response:
             xml_calls = self._parse_xml_function_calls(full_response)
             if xml_calls:
-                log.warning(
-                    f"[SERVER] Extracted {len(xml_calls)} XML function calls from content"
-                )
+                log.warning(f"[SERVER] Extracted {len(xml_calls)} XML function calls from content")
                 tool_calls = xml_calls
                 # Remove XML from content to clean up response
                 import re
@@ -189,9 +171,25 @@ class JarvisServer:
                     flags=re.DOTALL,
                 ).strip()
 
-        log.warning(
-            f"[SERVER] After stream ended: tool_calls list has {len(tool_calls)} items"
-        )
+            # If no XML calls found, try NVIDIA-style tool calls
+            if not tool_calls:
+                nvidia_calls = self._parse_nvidia_tool_calls(full_response)
+                if nvidia_calls:
+                    log.warning(
+                        f"[SERVER] Extracted {len(nvidia_calls)} NVIDIA function calls from content"
+                    )
+                    tool_calls = nvidia_calls
+                    # Remove NVIDIA tool call section from content
+                    import re
+
+                    full_response = re.sub(
+                        r"<\|tool_calls_section_begin\|>.*?<\|tool_calls_section_end\|>",
+                        "",
+                        full_response,
+                        flags=re.DOTALL,
+                    ).strip()
+
+        log.warning(f"[SERVER] After stream ended: tool_calls list has {len(tool_calls)} items")
         for i, tc in enumerate(tool_calls):
             log.warning(
                 f"[SERVER] Tool call {i}: id={tc.get('id')}, "
@@ -263,9 +261,7 @@ class JarvisServer:
                             # Reconstruct valid JSON
                             valid_json = json.dumps(extracted)
                             call["function"]["arguments"] = valid_json
-                            log.warning(
-                                f"[SERVER] Extracted args manually: {extracted}"
-                            )
+                            log.warning(f"[SERVER] Extracted args manually: {extracted}")
                             return True
                     except Exception as extract_error:
                         log.debug(f"[SERVER] Manual extraction failed: {extract_error}")
@@ -302,15 +298,11 @@ class JarvisServer:
             # Skip tool execution if no valid tool calls remain
             tool_results = []
             if not valid_tool_calls:
-                log.warning(
-                    "[SERVER] No valid tool calls after filtering, skipping tool execution"
-                )
+                log.warning("[SERVER] No valid tool calls after filtering, skipping tool execution")
             else:
                 log.debug(f"[SERVER] Processing {len(valid_tool_calls)} tool calls")
                 tool_results = await self.process_tool_calls(valid_tool_calls)
-                log.warning(
-                    f"[SERVER] Tool results received: {len(tool_results)} results"
-                )
+                log.warning(f"[SERVER] Tool results received: {len(tool_results)} results")
             for i, tr in enumerate(tool_results):
                 content = tr.get("content", "")
                 log.warning(
@@ -339,14 +331,10 @@ class JarvisServer:
                     is_vision_tool = False
 
             if not is_vision_tool:
-                log.warning(
-                    f"[SERVER] Starting second LLM pass with {len(self.messages)} messages"
-                )
+                log.warning(f"[SERVER] Starting second LLM pass with {len(self.messages)} messages")
                 full_response = ""
                 second_pass_chunks = 0
-                async for chunk in client.chat(
-                    messages=self.messages, system=SYSTEM_PROMPT
-                ):
+                async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT):
                     second_pass_chunks += 1
                     if msg := chunk.get("message", {}):
                         if content := msg.get("content"):
@@ -371,25 +359,171 @@ class JarvisServer:
                         )
                         full_response += content
                         if broadcast_func:
-                            await broadcast_func(
-                                {"type": "streaming_chunk", "content": content}
-                            )
+                            await broadcast_func({"type": "streaming_chunk", "content": content})
                     elif tool_result := chunk.get("tool_calls"):
                         log.warning(f"[SERVER] Tool result in chunk: {tool_result}")
-                log.warning(
-                    f"[SERVER] Second pass completed with {len(full_response)} chars response"
-                )
 
-        self.messages.append({"role": "assistant", "content": full_response})
-        await streaming_interface.push_assistant_message(full_response)
-        await conversation_buffer.add_message(
-            {"role": "assistant", "content": full_response}
-        )
+                # Multi-pass tool calling: keep processing until we get a clean response
+                max_passes = 5  # Prevent infinite loops
+                current_pass = 0
+
+                while current_pass < max_passes:
+                    current_pass += 1
+
+                    # Check if this is a vision tool - use result directly
+                    is_vision_tool = "screenshot_analyze" in tool_names and current_pass == 1
+                    if is_vision_tool and tool_results:
+                        try:
+                            vision_data = json.loads(tool_results[0].get("content", "{}"))
+                            full_response = vision_data.get("analysis", "")
+                            log.warning(
+                                f"[SERVER] Using vision response directly: {len(full_response)} chars"
+                            )
+                            if broadcast_func:
+                                await broadcast_func(
+                                    {
+                                        "type": "streaming_chunk",
+                                        "content": full_response,
+                                        "replace": True,
+                                    }
+                                )
+                            break  # Vision tool is done
+                        except Exception as e:
+                            log.warning(f"[SERVER] Failed to extract vision response: {e}")
+                            is_vision_tool = False
+
+                    # Skip streaming pass if we have vision tool result
+                    if is_vision_tool:
+                        break
+
+                    log.warning(
+                        f"[SERVER] Starting pass {current_pass}/{max_passes} with {len(self.messages)} messages"
+                    )
+                    full_response = ""
+                    pass_chunks = 0
+                    tool_call_buffer = ""  # Buffer to accumulate potential tool calls
+                    in_tool_call = False  # Track if we're inside a tool call
+
+                    async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT):
+                        pass_chunks += 1
+                        content = None
+
+                        if msg := chunk.get("message", {}):
+                            content = msg.get("content")
+                            if calls := msg.get("tool_calls"):
+                                log.warning(
+                                    f"[SERVER] Unexpected tool calls in pass {current_pass}: {len(calls)}"
+                                )
+                        elif chunk.get("content"):
+                            content = chunk.get("content")
+                        elif chunk.get("tool_calls"):
+                            log.warning(f"[SERVER] Tool result in chunk: {chunk.get('tool_calls')}")
+
+                        if content:
+                            log.info(
+                                f"[SERVER] Pass {current_pass} chunk {pass_chunks}: {len(content)} chars"
+                            )
+                            full_response += content
+
+                            # Buffer for tool call detection
+                            tool_call_buffer += content
+
+                            # Check if we're entering or inside a tool call
+                            if "<|tool_calls_section_begin|>" in content:
+                                in_tool_call = True
+                                log.warning(
+                                    f"[SERVER] Detected <|tool_calls_section_begin|> start in pass {current_pass}"
+                                )
+                                # Don't broadcast until we see the closing tag
+                                continue
+
+                            if in_tool_call:
+                                if "<|tool_calls_section_end|>" in content:
+                                    # Complete tool call found - parse and execute
+                                    in_tool_call = False
+                                    log.warning(
+                                        f"[SERVER] Detected <|tool_calls_section_end|> end in pass {current_pass}"
+                                    )
+
+                                    # Parse the tool call from buffer
+                                    parsed_calls = self._parse_nvidia_tool_calls(tool_call_buffer)
+                                    if parsed_calls:
+                                        log.warning(
+                                            f"[SERVER] Parsed {len(parsed_calls)} NVIDIA tool calls from text"
+                                        )
+                                        # Execute the tool calls
+                                        tool_results = await self.process_tool_calls(parsed_calls)
+                                        self.messages.extend(tool_results)
+
+                                        # Clear the buffer - don't send tool call text to user
+                                        tool_call_buffer = ""
+                                        full_response = ""
+                                        break  # Exit this pass and start next one
+                                    else:
+                                        # Not a valid tool call, send what we have
+                                        in_tool_call = False
+                                else:
+                                    # Still inside tool call, don't send to user yet
+                                    continue
+
+                    # Normal content - send to user (but not tool call content)
+                    if broadcast_func and not in_tool_call:
+                        await broadcast_func({"type": "streaming_chunk", "content": content})
+
+                    # If we ended while still in a tool call (incomplete), try to parse anyway
+                    if in_tool_call and tool_call_buffer:
+                        log.warning(
+                            f"[SERVER] Stream ended while in tool call in pass {current_pass}, attempting to parse"
+                        )
+                        parsed_calls = self._parse_nvidia_tool_calls(tool_call_buffer)
+                        if parsed_calls:
+                            tool_results = await self.process_tool_calls(parsed_calls)
+                            self.messages.extend(tool_results)
+                            full_response = ""
+                            continue  # Go to next pass
+
+                    # Check if we have any NVIDIA-style tool calls in the response
+                    if (
+                        "<|tool_calls_section_begin|>" in full_response
+                        and "<|tool_calls_section_end|>" in full_response
+                    ):
+                        log.warning(
+                            f"[SERVER] Detected NVIDIA tool calls in pass {current_pass} response"
+                        )
+                        parsed_calls = self._parse_nvidia_tool_calls(full_response)
+                        if parsed_calls:
+                            log.warning(f"[SERVER] Parsed {len(parsed_calls)} NVIDIA tool calls")
+                            # Execute the tool calls
+                            tool_results = await self.process_tool_calls(parsed_calls)
+                            self.messages.extend(tool_results)
+                            # Clear response since we executed tools
+                            full_response = ""
+                            continue  # Go to next pass
+
+                    # No tool calls found - this is our final response
+                    # But only exit if we actually have content to show (not just whitespace)
+                    if full_response.strip():
+                        log.warning(
+                            f"[SERVER] Pass {current_pass} completed with {len(full_response)} chars response - no more tool calls"
+                        )
+                        break  # Exit the multi-pass loop
+                    else:
+                        # Continue to next pass even if no tool calls, in case we need to process more
+                        log.warning(
+                            f"[SERVER] Pass {current_pass} completed with empty response, continuing to next pass"
+                        )
+
+        # Only append non-empty responses to maintain conversation flow
+        if full_response.strip():
+            self.messages.append({"role": "assistant", "content": full_response})
+            await streaming_interface.push_assistant_message(full_response)
+            await conversation_buffer.add_message({"role": "assistant", "content": full_response})
+        else:
+            # If we have no content but had tool calls, the tool results are already in messages
+            log.warning("[SERVER] Skipping empty assistant message append")
 
         if broadcast_func:
-            await broadcast_func(
-                {"type": "message_complete", "full_response": full_response}
-            )
+            await broadcast_func({"type": "message_complete", "full_response": full_response})
 
         # Cache response if appropriate
         if should_cache_response(user_input, full_response):
@@ -479,9 +613,7 @@ class JarvisServer:
 
                     # Pattern 2: Partial object missing opening brace
                     # e.g., '"num_results": 10}' or 'query": "weather", "num_results": 10}'
-                    elif not fixed_args.startswith("{") and not fixed_args.startswith(
-                        "["
-                    ):
+                    elif not fixed_args.startswith("{") and not fixed_args.startswith("["):
                         if fixed_args.endswith("}") and ":" in fixed_args:
                             # Try prepending '{'
                             try:
@@ -496,9 +628,7 @@ class JarvisServer:
 
                     # Try wrapping bare values in an object based on tool name
                     # (if still not valid JSON)
-                    if not fixed_args.startswith("{") and not fixed_args.startswith(
-                        "["
-                    ):
+                    if not fixed_args.startswith("{") and not fixed_args.startswith("["):
                         if name == "launch_app":
                             fixed_args = '{"app_name": ' + json.dumps(fixed_args) + "}"
                         elif name == "web_search":
@@ -534,9 +664,7 @@ class JarvisServer:
 
                     # For web_search, ensure 'query' parameter exists
                     if name == "web_search" and "query" not in args:
-                        log.error(
-                            f"[SERVER] web_search missing required 'query' parameter: {args}"
-                        )
+                        log.error(f"[SERVER] web_search missing required 'query' parameter: {args}")
                         args = {"error": "Missing required 'query' parameter"}
 
                     log.warning(f"[SERVER] Recovered args after fix: {args}")
@@ -560,9 +688,7 @@ class JarvisServer:
                     f"error={result.error}"
                     f"data_len={len(str(result.data)) if result.data else 0}, error={result.error}"
                 )
-                content = json.dumps(
-                    result.data if result.success else {"error": result.error}
-                )
+                content = json.dumps(result.data if result.success else {"error": result.error})
                 log.debug(f"[SERVER] Tool {name} content length: {len(content)}")
                 return {
                     "role": "tool",
@@ -579,9 +705,7 @@ class JarvisServer:
 
         # Filter out invalid tool calls before executing
         valid_tool_calls = [
-            call
-            for call in tool_calls
-            if call.get("function", {}).get("name") and call.get("id")
+            call for call in tool_calls if call.get("function", {}).get("name") and call.get("id")
         ]
 
         if len(valid_tool_calls) != len(tool_calls):
@@ -663,14 +787,69 @@ class JarvisServer:
                         },
                     }
                     calls.append(call)
-                    log.debug(
-                        f"[SERVER] Parsed XML function call: {name} with args: {args}"
-                    )
+                    log.debug(f"[SERVER] Parsed XML function call: {name} with args: {args}")
 
             except ET.ParseError as e:
                 log.debug(f"[SERVER] Failed to parse XML function calls: {e}")
                 # Fallback: try regex extraction
                 calls.extend(self._extract_xml_calls_with_regex(match.group(1)))
+
+        return calls
+
+    def _parse_nvidia_tool_calls(self, content: str) -> list[dict]:
+        """Parse NVIDIA-style tool calls from LLM response content.
+
+        Handles format like:
+        <|tool_calls_section_begin|>
+        <|tool_call_begin|>  functions.web_search:3
+        <|tool_call_argument_begin|> {"query": "...", "num_results": 5}
+        <|tool_call_end|>
+        <|tool_call_begin|>  functions.web_search:4
+        <|tool_call_argument_begin|> {"query": "...", "num_results": 5}
+        <|tool_call_end|>
+        <|tool_calls_section_end|>
+        """
+        calls = []
+
+        # Check if this is a tool call section
+        if "<|tool_calls_section_begin|>" not in content:
+            return calls
+
+        # Extract the tool calls section
+        section_start = content.find("<|tool_calls_section_begin|>")
+        section_end = content.find("<|tool_calls_section_end|>")
+
+        if section_start == -1 or section_end == -1:
+            return calls
+
+        section_content = content[section_start:section_end]
+
+        # Find all individual tool calls
+        tool_call_pattern = re.compile(
+            r"<\|tool_call_begin\|>\s*functions\.(\w+):(\d+)\s*"
+            r"<\|tool_call_argument_begin\|>\s*(\{.*?\})\s*"
+            r"<\|tool_call_end\|>",
+            re.DOTALL,
+        )
+
+        for match in tool_call_pattern.finditer(section_content):
+            name = match.group(1)
+            call_id = match.group(2)
+            args_str = match.group(3)
+
+            # Create tool call with raw arguments - let downstream validation handle parsing
+            call = {
+                "id": f"nvidia_{call_id}_{len(calls)}",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": args_str,  # Pass raw string, let process_tool_calls handle parsing
+                },
+            }
+            calls.append(call)
+            log.warning(
+                f"[SERVER] Parsed NVIDIA tool call: {name}:{call_id} with raw args: {args_str[:100]}"
+            )
 
         return calls
 
@@ -766,9 +945,7 @@ class JarvisServer:
                 # Update name if we got one (previously null)
                 if name and not existing.get("function", {}).get("name"):
                     existing["function"]["name"] = name
-                    log.warning(
-                        f"[SERVER] Updated function name for index {idx}: {name}"
-                    )
+                    log.warning(f"[SERVER] Updated function name for index {idx}: {name}")
             else:
                 # New tool call - make sure it has an index
                 log.warning(f"[SERVER] ELSE BRANCH: adding new call at index {idx}")
