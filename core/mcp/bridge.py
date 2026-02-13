@@ -8,7 +8,7 @@ from typing import Any
 from core.mcp.manager import get_mcp_manager
 from tools.base import BaseTool, ToolResult
 
-log = logging.getLogger("jarvis.mcp.bridge")
+log = logging.getLogger(__name__)
 
 
 class MCPToolBridge(BaseTool):
@@ -129,7 +129,7 @@ class MCPBridgeManager:
         """Register all bridged tools with a ToolRegistry."""
         for tool in self.bridged_tools:
             registry.register(tool)
-            log.debug(f"Registered MCP tool in registry: {tool.name}")
+            # log.debug(f"Registered MCP tool in registry: {tool.name}")
 
         log.info(f"Registered {len(self.bridged_tools)} MCP tools with registry")
 

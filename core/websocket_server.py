@@ -3,6 +3,7 @@
 import json
 import logging
 import sys
+import os
 from typing import Set
 
 # Load environment variables from .env file
@@ -17,6 +18,7 @@ from rich.logging import RichHandler
 
 from core.discord_bot import discord_bot_handler
 from core.telegram_bot import telegram_bot_handler
+from core.whatsapp_bailey_client import whatsapp_bailey_client
 from jarvis.server import JarvisServer
 
 log = logging.getLogger("jarvis.websocket")
@@ -65,10 +67,12 @@ def setup_logging(debug: bool = False) -> None:  # Changed default to False
 
 app = FastAPI(title="JARVIS Server")
 
-# Add CORS middleware for development
+allowed_cors_origins = os.environ.get(
+    "CORS_ORIGINS", "http://localhost:3000,http://localhost:8000"
+).split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -91,19 +95,6 @@ async def broadcast(message: dict):
         except Exception as e:
             log.error(f"[WEBSOCKET] Failed to send to client: {e}")
             connected_clients.discard(client)
-
-
-async def broadcast_to_ip(message: dict, ip: str):
-    """Broadcast a message to all clients with the same IP"""
-    if ip in connected_clients:
-        for client in connected_clients[ip].copy():  # Copy to avoid modification during iteration
-            try:
-                await client.send_json(message)
-            except Exception as e:
-                log.error(f"[WEBSOCKET] Failed to send to client {client}: {e}")
-                connected_clients[ip].discard(client)
-                if not connected_clients[ip]:
-                    del connected_clients[ip]
 
 
 @app.websocket("/ws")
@@ -148,16 +139,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    telegram_status = "running" if telegram_bot_handler.is_running() else "stopped"
-    discord_status = "running" if discord_bot_handler.is_running() else "stopped"
-    whatsapp_status = "running" if whatsapp_bot_handler.is_running() else "stopped"
+    whatsapp_status = await whatsapp_bailey_client.check_status()
     return {
         "status": "healthy",
         "clients": len(connected_clients),
-        "telegram_bot": telegram_status,
-        "discord_bot": discord_status,
-        "whatsapp_bot": whatsapp_status,
+        "telegram_bot": "running" if telegram_bot_handler.is_running() else "stopped",
+        "discord_bot": "running" if discord_bot_handler.is_running() else "stopped",
+        "whatsapp_bot": ("connected" if whatsapp_status.get("connected") else "disconnected"),
     }
 
 
@@ -175,8 +163,7 @@ async def discord_status():
 
 @app.get("/whatsapp/status")
 async def whatsapp_status():
-    """Get WhatsApp bot status"""
-    return whatsapp_bot_handler.get_stats()
+    return await whatsapp_bailey_client.check_status()
 
 
 @app.post("/telegram/start")
@@ -193,11 +180,10 @@ async def discord_start():
     return {"started": success, "running": discord_bot_handler.is_running()}
 
 
-@app.post("/whatsapp/start")
-async def whatsapp_start():
-    """Start WhatsApp bot"""
-    success = await whatsapp_bot_handler.start(jarvis_server)
-    return {"started": success, "running": whatsapp_bot_handler.is_running()}
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(data: dict):
+    await whatsapp_bailey_client.handle_incoming_webhook(data)
+    return {"received": True}
 
 
 @app.post("/telegram/stop")
@@ -212,6 +198,16 @@ async def discord_stop():
     """Stop Discord bot"""
     await discord_bot_handler.stop()
     return {"running": discord_bot_handler.is_running()}
+
+
+@app.get("/whatsapp/qr")
+async def whatsapp_qr():
+    return await whatsapp_bailey_client.get_qr_code()
+
+
+@app.post("/whatsapp/disconnect")
+async def whatsapp_disconnect():
+    return await whatsapp_bailey_client.disconnect()
 
 
 @app.on_event("startup")
@@ -262,6 +258,11 @@ async def startup_event():
     else:
         log.info("[DISCORD] Skipping bot start (DISCORD_BOT_TOKEN not set)")
 
+    whatsapp_bailey_client.jarvis = jarvis_server
+    log.info(
+        "[WHATSAPP] Client initialized. Run 'node services/whatsapp-bailey/server.js' to connect."
+    )
+
     try:
         log.info("[MCP] Initializing MCP servers...")
         mcp_results = await jarvis_server.tools.initialize_mcp()
@@ -280,7 +281,6 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Stop Telegram and Discord bots on server shutdown."""
     log.info("[SERVER] Shutting down...")
     if telegram_bot_handler.is_running():
         await telegram_bot_handler.stop()
@@ -288,10 +288,14 @@ async def shutdown_event():
     if discord_bot_handler.is_running():
         await discord_bot_handler.stop()
         log.info("[DISCORD] Bot stopped")
+    await whatsapp_bailey_client.close()
 
 
 def run_server(
-    host: str = "localhost", port: int = 8000, debug: bool = True, enable_telegram: bool = True
+    host: str = "localhost",
+    port: int = 8000,
+    debug: bool = True,
+    enable_telegram: bool = True,
 ):
     """Run the WebSocket server"""
     import uvicorn
