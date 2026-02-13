@@ -66,5 +66,12 @@ uv.lock
 # 2dModels
 2dModels/
 
-# public 
+# public
 public/
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# WhatsApp Baileys auth files
+services/whatsapp-bailey/auth_info_baileys/

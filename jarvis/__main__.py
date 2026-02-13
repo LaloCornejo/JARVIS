@@ -965,8 +965,7 @@ class JarvisApp(App):
             except Exception as e:
                 log.error(f"Failed to initialize MCP: {e}")
 
-        # Schedule MCP initialization
-        asyncio.create_task(init_mcp())
+            self.call_later(init_mcp)
 
         # Preload vision model at startup for faster responses
         self._vision_client = get_vision_client()
