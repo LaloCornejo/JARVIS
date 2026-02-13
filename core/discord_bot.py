@@ -1,18 +1,15 @@
 """Discord Bot Handler for JARVIS - Active two-way communication.
-
 This module provides a background service that:
 - Connects to Discord Gateway for real-time events
 - Receives and processes messages from Discord channels
 - Routes messages to JARVIS for processing
 - Sends responses back to Discord channels
 - Maintains conversation context per channel/user
-
 Usage:
     from core.discord_bot import discord_bot_handler
     await discord_bot_handler.start()
     # ... JARVIS running ...
     await discord_bot_handler.stop()
-
 Setup:
     1. Create a Discord application at https://discord.com/developers/applications
     2. Create a Bot user and get the token
@@ -41,20 +38,28 @@ try:
 except ImportError:
     HAS_VOICE_RECV = False
     voice_recv = None
-
 # Import STT functionality
 from core.voice.stt import OptimizedSpeechToText
 
+try:
+    from core.discord_voice import VOICE_AVAILABLE, DiscordTTSPlayer, VoiceWebSocket
+except ImportError as _discord_voice_import_error:
+    _import_error_msg = str(_discord_voice_import_error)
+    VOICE_AVAILABLE = False
+    DiscordTTSPlayer = None
+    VoiceWebSocket = None
 # Reduce websocket logging verbosity
 logging.getLogger("websockets").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
-
 if TYPE_CHECKING:
     from jarvis.server import JarvisServer
 
 log = logging.getLogger(__name__)
+
+if not VOICE_AVAILABLE:
+    log.warning(f"[DISCORD] Voice module not available: voice dependencies may not be installed")
 
 
 @dataclass
@@ -70,8 +75,8 @@ class DiscordSession:
     messages: list[dict] = field(default_factory=list)
     last_activity: datetime = field(default_factory=datetime.now)
     max_messages: int = 25
-    voice_client: Any | None = None  # Voice client for voice channels
-    voice_sink: Any | None = None  # Audio sink for voice receiving
+    voice_client: Any | None = None
+    voice_sink: Any | None = None
 
     def add_message(self, role: str, content: str, **kwargs) -> None:
         """Add a message to the conversation history."""
@@ -84,7 +89,6 @@ class DiscordSession:
             }
         )
         self.last_activity = datetime.now()
-        # Trim old messages
         if len(self.messages) > self.max_messages:
             self.messages = self.messages[-self.max_messages :]
 
@@ -119,16 +123,13 @@ class DiscordBotHandler:
         allowed_channel_ids: list[str] | None = None,
         allowed_guild_ids: list[str] | None = None,
         dm_only: bool = False,
-        mention_only: bool = False,  # Changed default to False for better user experience
+        mention_only: bool = False,
     ):
-        # Don't load token in __init__, load it when needed
         self.token = ""
         self.jarvis: "JarvisServer | None" = jarvis_server
         self.poll_interval = poll_interval
         self.dm_only = dm_only
         self.mention_only = mention_only
-
-        # Load allowed IDs from parameters or env vars
         if allowed_channel_ids is not None:
             self.allowed_channel_ids = set(allowed_channel_ids)
         else:
@@ -136,7 +137,6 @@ class DiscordBotHandler:
             self.allowed_channel_ids = (
                 set(id.strip() for id in env_ids.split(",") if id.strip()) or None
             )
-
         if allowed_guild_ids is not None:
             self.allowed_guild_ids = set(allowed_guild_ids)
         else:
@@ -144,8 +144,6 @@ class DiscordBotHandler:
             self.allowed_guild_ids = (
                 set(id.strip() for id in env_ids.split(",") if id.strip()) or None
             )
-
-        # Connection state
         self._running = False
         self._ws_task: asyncio.Task | None = None
         self._heartbeat_task: asyncio.Task | None = None
@@ -157,25 +155,18 @@ class DiscordBotHandler:
         self._last_heartbeat_ack: bool = True
         self._zlib_suffix = b"\x00\x00\xff\xff"
         self._zlib_inflater: zlib._Decompress | None = None
-
-        # Bot info
         self._bot_info: dict | None = None
         self._bot_user_id: str | None = None
         self._bot_username: str | None = None
-
-        # Sessions
         self._sessions: dict[str, DiscordSession] = {}
-
-        # Voice clients
-        self._voice_clients: dict[str, Any] = {}  # guild_id -> voice_client
-
-        # STT for voice processing (will be initialized when event loop is available)
+        self._voice_clients: dict[str, Any] = {}
+        self._voice_player: DiscordTTSPlayer | None = None
+        self._voice_states: dict[str, dict] = {}
+        self._voice_websockets: dict[str, VoiceWebSocket] = {}
+        self._voice_session_ids: dict[str, str] = {}
+        self._pending_voice_server_updates: dict[str, dict] = {}
         self._stt = None
-
-        # HTTP client
         self._http_client: httpx.AsyncClient | None = None
-
-        # Command handlers
         self._command_handlers: dict[str, Callable] = {
             "!jarvis": self._handle_help,
             "!help": self._handle_help,
@@ -192,22 +183,15 @@ class DiscordBotHandler:
         if self._running:
             log.warning("[DISCORD] Handler already running")
             return True
-
-        # Load token when needed
         if not self.token:
             self.token = os.environ.get("DISCORD_BOT_TOKEN", "")
-
         if not self.token:
             log.error("[DISCORD] No bot token configured. Set DISCORD_BOT_TOKEN")
             return False
-
-        # Initialize HTTP client
         self._http_client = httpx.AsyncClient(
             headers={"Authorization": f"Bot {self.token}"},
             timeout=30.0,
         )
-
-        # Get bot info
         try:
             response = await self._http_client.get(f"{self.API_URL}/users/@me")
             if response.status_code == 200:
@@ -221,13 +205,11 @@ class DiscordBotHandler:
         except Exception as e:
             log.error(f"[DISCORD] Error connecting to Discord: {e}")
             return False
-
-        # Initialize STT now that we have an event loop
         if self._stt is None:
             try:
                 self._stt = OptimizedSpeechToText(
                     model_size="base.en",
-                    device="cpu",  # Use CPU for compatibility
+                    device="cpu",
                     compute_type="int8",
                     preload=True,
                 )
@@ -235,10 +217,23 @@ class DiscordBotHandler:
             except Exception as e:
                 log.error(f"[DISCORD] Failed to initialize STT: {e}")
                 self._stt = None
-
         self.jarvis = jarvis_server
         self._running = True
         self._ws_task = asyncio.create_task(self._websocket_loop())
+        log.info(
+            f"[DISCORD] Voice initialization - VOICE_AVAILABLE: {VOICE_AVAILABLE}, DiscordTTSPlayer: {DiscordTTSPlayer is not None}, jarvis: {self.jarvis is not None}"
+        )
+        if VOICE_AVAILABLE and DiscordTTSPlayer and self.jarvis and hasattr(self.jarvis, "tts"):
+            try:
+                self._voice_player = DiscordTTSPlayer(self.jarvis.tts)
+                log.info("[DISCORD] Voice player initialized successfully")
+            except Exception as e:
+                log.error(f"[DISCORD] Failed to initialize voice player: {e}", exc_info=True)
+                self._voice_player = None
+        else:
+            log.warning(
+                f"[DISCORD] Voice player not initialized - VOICE_AVAILABLE={VOICE_AVAILABLE}, DiscordTTSPlayer={DiscordTTSPlayer is not None}, jarvis={self.jarvis is not None}, has_tts={hasattr(self.jarvis, 'tts') if self.jarvis else False}"
+            )
         log.info("[DISCORD] Handler started")
         return True
 
@@ -246,11 +241,10 @@ class DiscordBotHandler:
         """Stop the Discord bot handler."""
         if not self._running:
             return
-
         log.info("[DISCORD] Stopping handler...")
         self._running = False
+        await self._cleanup_voice_resources()
 
-        # Cancel tasks
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
             try:
@@ -258,7 +252,6 @@ class DiscordBotHandler:
             except asyncio.CancelledError:
                 pass
             self._heartbeat_task = None
-
         if self._ws_task:
             self._ws_task.cancel()
             try:
@@ -266,21 +259,35 @@ class DiscordBotHandler:
             except asyncio.CancelledError:
                 pass
             self._ws_task = None
-
-        # Close WebSocket
         if self._websocket:
             try:
                 await self._websocket.close()
             except Exception:
                 pass
             self._websocket = None
-
-        # Close HTTP client
         if self._http_client:
             await self._http_client.aclose()
             self._http_client = None
-
         log.info("[DISCORD] Handler stopped")
+
+    async def _cleanup_voice_resources(self) -> None:
+        if self._voice_player:
+            try:
+                for guild_id in list(self._voice_player._connections.keys()):
+                    await self._voice_player.disconnect_from_voice(guild_id)
+            except Exception as e:
+                log.warning(f"[DISCORD] Error disconnecting voice player: {e}")
+            self._voice_player = None
+
+        for guild_id, ws in list(self._voice_websockets.items()):
+            try:
+                await ws.disconnect()
+            except Exception as e:
+                log.warning(f"[DISCORD] Error closing voice WebSocket for guild {guild_id}: {e}")
+        self._voice_websockets.clear()
+        self._voice_states.clear()
+        self._voice_session_ids.clear()
+        self._pending_voice_server_updates.clear()
 
     def is_running(self) -> bool:
         return self._running
@@ -303,39 +310,26 @@ class DiscordBotHandler:
         """Main WebSocket connection loop with reconnection support."""
         reconnect_delay = 1.0
         max_reconnect_delay = 60.0
-
         while self._running:
             try:
-                # Use resume URL if available
                 gateway_url = self._resume_gateway_url or self.GATEWAY_URL
-
                 log.info(f"[DISCORD] Connecting to Gateway: {gateway_url}")
                 async with websockets.connect(gateway_url) as websocket:
                     self._websocket = websocket
                     log.info("[DISCORD] WebSocket connected")
-
-                    # Reset reconnection delay on successful connection
                     reconnect_delay = 1.0
-
-                    # Initialize zlib inflater for compressed payloads
                     self._zlib_inflater = zlib.decompressobj()
-
-                    # Handle messages
                     async for message in websocket:
                         if not self._running:
                             break
-
                         try:
                             await self._handle_gateway_message(message)
                         except Exception as e:
                             log.error(f"[DISCORD] Error handling message: {e}")
-
             except websockets.exceptions.ConnectionClosed as e:
                 log.warning(f"[DISCORD] WebSocket closed: {e}")
             except Exception as e:
                 log.error(f"[DISCORD] WebSocket error: {e}")
-
-            # Attempt reconnection
             if self._running:
                 log.info(f"[DISCORD] Reconnecting in {reconnect_delay}s...")
                 await asyncio.sleep(reconnect_delay)
@@ -343,47 +337,38 @@ class DiscordBotHandler:
 
     async def _handle_gateway_message(self, message: bytes | str) -> None:
         """Handle a message from the Discord Gateway."""
-        # Decompress if needed
         if isinstance(message, bytes):
             try:
-                # Check for zlib suffix
                 if message.endswith(self._zlib_suffix):
                     message = self._zlib_inflater.decompress(message)
                     message = message.decode("utf-8")
                 else:
-                    # Partial message, decompress what we have
                     message = self._zlib_inflater.decompress(message)
                     message = message.decode("utf-8")
             except Exception as e:
                 log.error(f"[DISCORD] Decompression error: {e}")
                 return
-
         try:
             payload = json.loads(message)
         except json.JSONDecodeError:
             log.error("[DISCORD] Failed to parse JSON message")
             return
-
-        # Update sequence number
         sequence = payload.get("s")
         if sequence is not None:
             self._sequence_number = sequence
-
         op_code = payload.get("op")
         event_type = payload.get("t")
         event_data = payload.get("d", {})
-
-        # Handle opcode
-        if op_code == 10:  # Hello
+        if op_code == 10:
             await self._handle_hello(event_data)
-        elif op_code == 11:  # Heartbeat ACK
+        elif op_code == 11:
             self._last_heartbeat_ack = True
-        elif op_code == 0:  # Dispatch
+        elif op_code == 0:
             await self._handle_dispatch(event_type, event_data)
-        elif op_code == 7:  # Reconnect
+        elif op_code == 7:
             log.info("[DISCORD] Received reconnect request")
-            self._resume_gateway_url = None  # Force full reconnect
-        elif op_code == 9:  # Invalid Session
+            self._resume_gateway_url = None
+        elif op_code == 9:
             log.warning("[DISCORD] Invalid session, re-identifying")
             self._session_id = None
             self._sequence_number = None
@@ -393,13 +378,9 @@ class DiscordBotHandler:
     async def _handle_hello(self, data: dict) -> None:
         """Handle Gateway Hello event."""
         self._heartbeat_interval = data.get("heartbeat_interval", 45000) / 1000
-
-        # Start heartbeat
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-
-        # Identify or resume
         if self._session_id and self._sequence_number:
             await self._send_resume()
         else:
@@ -409,14 +390,11 @@ class DiscordBotHandler:
         """Send periodic heartbeats to keep connection alive."""
         while self._running and self._websocket:
             try:
-                # Wait for heartbeat interval
                 await asyncio.sleep(self._heartbeat_interval or 45)
-
                 if not self._last_heartbeat_ack:
                     log.warning("[DISCORD] Heartbeat not acknowledged, reconnecting")
                     await self._websocket.close()
                     return
-
                 self._last_heartbeat_ack = False
                 await self._send_heartbeat()
             except asyncio.CancelledError:
@@ -434,12 +412,11 @@ class DiscordBotHandler:
         """Send identify payload to authenticate."""
         if not self._websocket:
             return
-
         payload = {
             "op": 2,
             "d": {
                 "token": self.token,
-                "intents": 33409,  # GUILDS (1) + GUILD_MESSAGES (512) + GUILD_VOICE_STATES (128) + MESSAGE_CONTENT (32768)
+                "intents": 33409,
                 "properties": {
                     "os": "linux",
                     "browser": "JARVIS",
@@ -454,7 +431,6 @@ class DiscordBotHandler:
         """Send resume payload to continue previous session."""
         if not self._websocket:
             return
-
         payload = {
             "op": 6,
             "d": {
@@ -470,40 +446,61 @@ class DiscordBotHandler:
         """Handle Discord dispatch events."""
         if not event_type:
             return
-
         if event_type == "READY":
             self._session_id = data.get("session_id")
             self._resume_gateway_url = data.get("resume_gateway_url")
             user = data.get("user", {})
             log.info(f"[DISCORD] Ready as {user.get('username')}#{user.get('discriminator', '0')}")
-
         elif event_type == "MESSAGE_CREATE":
             await self._handle_message_create(data)
-
         elif event_type == "RESUMED":
             log.info("[DISCORD] Session resumed")
-
         elif event_type == "VOICE_STATE_UPDATE":
             await self._handle_voice_state_update(data)
-
         elif event_type == "VOICE_SERVER_UPDATE":
             await self._handle_voice_server_update(data)
 
     async def _handle_voice_state_update(self, data: dict) -> None:
         """Handle voice state update events."""
-        user_id = data.get("user", {}).get("id")
+        user_id = data.get("user_id")
         guild_id = data.get("guild_id")
         channel_id = data.get("channel_id")
+        session_id = data.get("session_id")
 
-        # If this is about our bot, update our voice client tracking
+        log.debug(
+            f"[DISCORD] Voice state update - User: {user_id}, Guild: {guild_id}, Channel: {channel_id}, Session: {session_id}"
+        )
+        log.debug(f"[DISCORD] Bot user ID: {self._bot_user_id}")
+
         if user_id == self._bot_user_id:
-            log.info(f"[DISCORD] Voice state updated - Guild: {guild_id}, Channel: {channel_id}")
+            log.info(
+                f"[DISCORD] Bot voice state updated - Guild: {guild_id}, Channel: {channel_id}"
+            )
             if guild_id:
                 if channel_id:
-                    # Joined/moved to a voice channel
+                    self._voice_states[guild_id] = data
+                    log.debug(f"[DISCORD] Cached voice state for guild {guild_id}")
+                    if session_id:
+                        self._voice_session_ids[guild_id] = session_id
+                        log.debug(f"[DISCORD] Stored session_id for guild {guild_id}")
+                        if guild_id in self._pending_voice_server_updates:
+                            pending = self._pending_voice_server_updates.pop(guild_id)
+                            log.info(
+                                f"[DISCORD] Processing pending voice server update for guild {guild_id}"
+                            )
+                            await self._do_voice_server_connect(guild_id, pending)
+                else:
+                    if guild_id in self._voice_states:
+                        del self._voice_states[guild_id]
+                        log.debug(f"[DISCORD] Removed cached voice state for guild {guild_id}")
+                    if self._voice_player and self._voice_player.is_connected(guild_id):
+                        await self._voice_player.disconnect_from_voice(guild_id)
+                    if guild_id in self._voice_session_ids:
+                        del self._voice_session_ids[guild_id]
+
+                if channel_id:
                     log.info(f"[DISCORD] Bot joined voice channel {channel_id} in guild {guild_id}")
                 else:
-                    # Left a voice channel
                     if guild_id in self._voice_clients:
                         del self._voice_clients[guild_id]
                     log.info(f"[DISCORD] Bot left voice channel in guild {guild_id}")
@@ -515,53 +512,74 @@ class DiscordBotHandler:
         token = data.get("token")
 
         log.info(f"[DISCORD] Voice server update - Guild: {guild_id}, Endpoint: {endpoint}")
+        log.debug(f"[DISCORD] Voice player available: {self._voice_player is not None}")
+
+        if not self._voice_player or not endpoint or not guild_id:
+            log.debug(
+                f"[DISCORD] Skipping voice connection - player: {self._voice_player is not None}, endpoint: {endpoint}, guild: {guild_id}"
+            )
+            return
+
+        if not self._bot_user_id:
+            log.error("[DISCORD] Bot user ID not available")
+            return
+
+        session_id = self._voice_session_ids.get(guild_id)
+
+        if not session_id:
+            log.info(
+                f"[DISCORD] VOICE_STATE_UPDATE not yet received for guild {guild_id}, caching server update"
+            )
+            data["_timestamp"] = datetime.now().timestamp()
+            self._pending_voice_server_updates[guild_id] = data
+            self._cleanup_stale_pending_updates()
+            return
+
+        await self._do_voice_server_connect(guild_id, data)
+
+    def _cleanup_stale_pending_updates(self) -> None:
+        if not self._pending_voice_server_updates:
+            return
+        now = datetime.now().timestamp()
+        stale = [
+            gid
+            for gid, data in self._pending_voice_server_updates.items()
+            if data.get("_timestamp", 0) and now - data.get("_timestamp", 0) > 60
+        ]
+        for gid in stale:
+            del self._pending_voice_server_updates[gid]
+        if stale:
+            log.debug(f"[DISCORD] Cleaned up {len(stale)} stale pending voice updates")
 
     async def _handle_message_create(self, data: dict) -> None:
         """Handle incoming message."""
-        # Skip messages from the bot itself
         author = data.get("author", {})
         if author.get("id") == self._bot_user_id:
             return
-
-        # Skip bot messages if desired (optional)
         if author.get("bot"):
             return
-
-        # Get message info
         content = data.get("content", "")
         channel_id = data.get("channel_id")
         guild_id = data.get("guild_id")
         message_id = data.get("id")
-
-        # Get channel info
         channel_data = data.get("channel", {})
         is_dm = guild_id is None
-
         log.info(
             f"[DISCORD] Received message - Channel: {channel_id}, DM: {is_dm}, "
             f"Author: {author.get('username')}, Content: {content[:100]}..."
         )
-
-        # Check permissions
         if self.dm_only and not is_dm:
             log.debug("[DISCORD] Message filtered out - dm_only is True but this is not a DM")
             return
-
         if self.allowed_channel_ids and channel_id not in self.allowed_channel_ids:
             log.debug(f"[DISCORD] Message filtered out - Channel {channel_id} not in allowed list")
             return
-
         if self.allowed_guild_ids and guild_id and guild_id not in self.allowed_guild_ids:
             log.debug(f"[DISCORD] Message filtered out - Guild {guild_id} not in allowed list")
             return
-
-        # Check for mentions
         mentions = data.get("mentions", [])
         bot_mentioned = any(m.get("id") == self._bot_user_id for m in mentions)
-
-        # In guilds, check if we should respond to all messages or only mentions/commands
         if not is_dm:
-            # If mention_only is True, only respond to mentions or commands
             if self.mention_only:
                 if not bot_mentioned and not any(
                     content.startswith(cmd) for cmd in self._command_handlers
@@ -570,27 +588,20 @@ class DiscordBotHandler:
                         "[DISCORD] Message filtered out - mention_only is True but bot not mentioned"
                     )
                     return
-
-        # Get or create session
         session = self._get_or_create_session(
             channel_id=channel_id,
             guild_id=guild_id,
             user_id=author.get("id"),
             username=author.get("username"),
         )
-
         log.info(
             f"[DISCORD] Processing message from {author.get('username')} in {channel_id}: {content[:100]}..."
         )
-
-        # Check for commands
         for cmd, handler in self._command_handlers.items():
             if content.startswith(cmd):
                 log.info(f"[DISCORD] Handling command: {cmd}")
                 await handler(session, data, content)
                 return
-
-        # Process message through JARVIS
         log.info("[DISCORD] Sending message to JARVIS for processing")
         await self._process_message_through_jarvis(session, content, channel_id, message_id)
 
@@ -604,17 +615,11 @@ class DiscordBotHandler:
         """Send message to JARVIS and return response."""
         if not self.jarvis:
             log.error("[DISCORD] No JarvisServer configured")
-            await self._send_message(channel_id, "❌ JARVIS server not available")
+            await self._send_message(channel_id, "JARVIS server not available")
             return
-
-        # Add user message to session
         session.add_message("user", text)
-
-        # Send "typing" indicator
         await self._send_typing(channel_id)
-
         try:
-            # Process through JARVIS server
             full_response = ""
             response_chunks = []
 
@@ -644,20 +649,14 @@ class DiscordBotHandler:
             log.debug(
                 f"[DISCORD] Response chunks: {len(response_chunks)}, Full response: {len(full_response) if full_response else 0} chars"
             )
-
-            # If we got chunks but no complete message, join them
             if response_chunks and not full_response:
                 full_response = "".join(response_chunks)
                 log.debug(
                     f"[DISCORD] Joined chunks to form full response: {len(full_response)} chars"
                 )
-
             if full_response:
                 log.info(f"[DISCORD] Got response from JARVIS: {len(full_response)} chars")
-                # Add assistant response to session
                 session.add_message("assistant", full_response)
-
-                # Check if TTS service is available using the same health check as server
                 tts_available = False
                 if hasattr(self.jarvis, "tts") and self.jarvis.tts:
                     try:
@@ -669,40 +668,52 @@ class DiscordBotHandler:
                     except Exception as e:
                         log.warning(f"[DISCORD] TTS health check failed: {e}")
                         tts_available = False
-
                 if tts_available:
-                    # Generate audio from response
-                    try:
-                        log.info("[DISCORD] Generating TTS audio...")
-                        audio_data = await self.jarvis.tts.speak_to_audio(full_response)
-
-                        # Send audio message
-                        await self._send_audio_message(
-                            channel_id,
-                            audio_data,
-                            filename="response.mp3",
-                            text_content=full_response,  # Include text as well
-                            reply_to=message_id,
-                        )
-                        log.info("[DISCORD] Audio message sent successfully")
-                    except Exception as e:
-                        log.error(f"[DISCORD] Error generating/sending TTS: {e}")
-                        # Fallback to text message
-                        await self._send_long_message(
-                            channel_id, full_response, reply_to=message_id
-                        )
+                    in_voice = await self._is_in_voice_channel(session.guild_id)
+                    voice_player_connected = (
+                        self._voice_player.is_connected(session.guild_id)
+                        if self._voice_player
+                        else False
+                    )
+                    log.debug(
+                        f"[DISCORD] Voice check - in_voice: {in_voice}, voice_player: {self._voice_player is not None}, connected: {voice_player_connected}"
+                    )
+                    if in_voice and self._voice_player and voice_player_connected:
+                        try:
+                            await self._send_long_message(
+                                channel_id, full_response, reply_to=message_id
+                            )
+                            await self._voice_player.speak(session.guild_id, full_response)
+                            log.info("[DISCORD] Voice response sent successfully")
+                        except Exception as e:
+                            log.error(f"[DISCORD] Error speaking to voice: {e}")
+                    else:
+                        log.debug(f"[DISCORD] Not sending to voice - using audio attachment")
+                        try:
+                            audio_data = await self.jarvis.tts.speak_to_audio(full_response)
+                            await self._send_audio_message(
+                                channel_id,
+                                audio_data,
+                                filename="response.mp3",
+                                text_content=full_response,
+                                reply_to=message_id,
+                            )
+                            log.info("[DISCORD] Audio message sent successfully")
+                        except Exception as e:
+                            log.error(f"[DISCORD] Error generating/sending TTS: {e}")
+                            await self._send_long_message(
+                                channel_id, full_response, reply_to=message_id
+                            )
                 else:
-                    # Send text response
                     await self._send_long_message(channel_id, full_response, reply_to=message_id)
             else:
                 log.warning("[DISCORD] No response from JARVIS")
                 await self._send_message(
-                    channel_id, "🤔 I didn't get a response. Please try again.", reply_to=message_id
+                    channel_id, "I didn't get a response. Please try again.", reply_to=message_id
                 )
-
         except Exception as e:
             log.error(f"[DISCORD] Error processing message: {e}", exc_info=True)
-            await self._send_message(channel_id, f"❌ Error: {str(e)[:200]}", reply_to=message_id)
+            await self._send_message(channel_id, f"Error: {str(e)[:200]}", reply_to=message_id)
 
     async def _send_message(
         self,
@@ -714,13 +725,11 @@ class DiscordBotHandler:
         """Send a message to Discord."""
         if not self._http_client:
             return None
-
         payload: dict[str, Any] = {"content": content}
         if reply_to:
             payload["message_reference"] = {"message_id": reply_to}
         if embed:
             payload["embeds"] = [embed]
-
         try:
             response = await self._http_client.post(
                 f"{self.API_URL}/channels/{channel_id}/messages",
@@ -746,88 +755,23 @@ class DiscordBotHandler:
         """Send an audio message to Discord with optional text content."""
         if not self._http_client:
             return None
-
         try:
             import io
 
-            # Create file-like object - important: set position to 0
             audio_file = io.BytesIO(audio_data)
             audio_file.seek(0)
-
-            # For Discord file uploads with additional fields, we need to use payload_json
             payload_data = {}
             if text_content:
                 payload_data["content"] = text_content
             if reply_to:
                 payload_data["message_reference"] = {"message_id": reply_to}
-
-            # If we don't have any payload data, we can send the file directly with content
-            if not payload_data and text_content:
-                # Simple case: just send file with text content
-                files = {"file": (filename, audio_file, "audio/mpeg")}
-                data = {"content": text_content}
-            else:
-                # Complex case: use payload_json for proper structuring
-                files = {"file": (filename, audio_file, "audio/mpeg")}
-                data = {"payload_json": json.dumps(payload_data)}
-
-            # Use httpx multipart encoding directly
-            response = await self._http_client.post(
-                f"{self.API_URL}/channels/{channel_id}/messages",
-                files=files,
-                data=data,
-            )
-
-            if response.status_code in (200, 201):
-                result = response.json()
-                log.info(f"[DISCORD] Audio message sent successfully to channel {channel_id}")
-                return result
-            else:
-                log.error(f"[DISCORD] Failed to send audio message: {response.status_code}")
-                log.error(f"[DISCORD] Response: {response.text}")
-                return None
-        except Exception as e:
-            log.error(f"[DISCORD] Error sending audio message: {e}")
-            return None
-
-        try:
-            import io
-
-            # Create file-like object - important: set position to 0
-            audio_file = io.BytesIO(audio_data)
-            audio_file.seek(0)
-
-            # Prepare multipart data using httpx standard approach
             files = {"file": (filename, audio_file, "audio/mpeg")}
-
-            # For Discord API, we need to send the data as form fields
-            # message_reference should be sent as a separate form field if needed
-            data = {}
-            if text_content:
-                data["content"] = text_content
-            if reply_to:
-                # Message reference should be sent as JSON in the form data
-                data["payload_json"] = json.dumps({"message_reference": {"message_id": reply_to}})
-
-            # If we have both text content and reply_to, we need to use payload_json
-            if text_content and reply_to:
-                data = {
-                    "payload_json": json.dumps(
-                        {"content": text_content, "message_reference": {"message_id": reply_to}}
-                    )
-                }
-            elif text_content:
-                data["content"] = text_content
-            elif reply_to:
-                data["payload_json"] = json.dumps({"message_reference": {"message_id": reply_to}})
-
-            # Use httpx multipart encoding directly
+            data = {"payload_json": json.dumps(payload_data)}
             response = await self._http_client.post(
                 f"{self.API_URL}/channels/{channel_id}/messages",
                 files=files,
                 data=data,
             )
-
             if response.status_code in (200, 201):
                 result = response.json()
                 log.info(f"[DISCORD] Audio message sent successfully to channel {channel_id}")
@@ -847,31 +791,22 @@ class DiscordBotHandler:
         reply_to: str | None = None,
     ) -> None:
         """Send a potentially long message, splitting if needed."""
-        # Discord message limit is 2000 characters
         max_length = 1950
-
         if len(text) <= max_length:
             await self._send_message(channel_id, text, reply_to)
             return
-
-        # Split into chunks
         chunks = []
         while text:
             if len(text) <= max_length:
                 chunks.append(text)
                 break
-
-            # Find a good breaking point (newline or space)
             split_point = text.rfind("\n", 0, max_length)
             if split_point == -1:
                 split_point = text.rfind(" ", 0, max_length)
             if split_point == -1:
                 split_point = max_length
-
             chunks.append(text[:split_point])
             text = text[split_point:].strip()
-
-        # Send chunks
         for i, chunk in enumerate(chunks):
             prefix = f"({i + 1}/{len(chunks)}) " if len(chunks) > 1 else ""
             await self._send_message(channel_id, prefix + chunk, reply_to if i == 0 else None)
@@ -882,7 +817,6 @@ class DiscordBotHandler:
         """Send typing indicator."""
         if not self._http_client:
             return
-
         try:
             await self._http_client.post(
                 f"{self.API_URL}/channels/{channel_id}/typing",
@@ -910,12 +844,12 @@ class DiscordBotHandler:
 
     async def _get_voice_state(self, guild_id: str) -> dict | None:
         """Get voice state for a guild."""
+        if guild_id in self._voice_states:
+            return self._voice_states[guild_id]
         if not self._http_client:
             log.error("[DISCORD] No HTTP client available for voice state retrieval")
             return None
-
         try:
-            # Try to get the bot's voice state in the guild
             response = await self._http_client.get(
                 f"{self.API_URL}/guilds/{guild_id}/voice-states/@me"
             )
@@ -923,6 +857,7 @@ class DiscordBotHandler:
             if response.status_code == 200:
                 voice_state = response.json()
                 log.debug(f"[DISCORD] Voice state: {voice_state}")
+                self._voice_states[guild_id] = voice_state
                 return voice_state
             else:
                 log.debug(f"[DISCORD] Failed to get voice state: {response.status_code}")
@@ -931,15 +866,21 @@ class DiscordBotHandler:
             log.debug(f"[DISCORD] Exception getting voice state: {e}")
         return None
 
+    async def _is_in_voice_channel(self, guild_id: str | None) -> bool:
+        """Check if bot is currently in a voice channel."""
+        if not guild_id:
+            return False
+        voice_state = await self._get_voice_state(guild_id)
+        return voice_state is not None and voice_state.get("channel_id") is not None
+
     async def _update_voice_state(self, guild_id: str, channel_id: str | None) -> bool:
         """Update voice state for a guild through Gateway."""
         if not self._websocket:
             log.error("[DISCORD] No WebSocket connection available for voice state update")
             return False
-
         try:
             payload = {
-                "op": 4,  # VOICE_STATE_UPDATE opcode
+                "op": 4,
                 "d": {
                     "guild_id": guild_id,
                     "channel_id": channel_id,
@@ -955,59 +896,64 @@ class DiscordBotHandler:
             log.error(f"[DISCORD] Failed to send voice state update: {e}")
             return False
 
-    # Command Handlers
-
     async def _handle_help(self, session: DiscordSession, message_data: dict, text: str) -> None:
         """Handle help command."""
-        help_text = """🤖 **JARVIS Discord Bot Help**
-
+        help_text = """**JARVIS Discord Bot Help**
 Just send me a message and I'll respond! I can:
-
-🌐 Search the web
-📝 Manage files and notes
-📧 Check email (if configured)
-📅 Manage calendar
-🎵 Control music
-🐳 Manage Docker containers
-📸 Take screenshots
-🔧 Run system commands
-💬 And much more!
-
+Search the web
+Manage files and notes
+Check email (if configured)
+Manage calendar
+Control music
+Manage Docker containers
+Take screenshots
+Run system commands
+And much more!
 **Commands:**
 `!jarvis` or `!help` - Show this help
 `!status` - Check bot status
 `!clear` - Clear conversation history
-`!join [channel_id]` - Join a voice channel (requires channel ID - right-click channel → Copy ID)
+`!join [channel_id]` - Join a voice channel (requires channel ID - right-click channel - Copy ID)
 `!leave` - Leave current voice channel
 `!listen` - Listen to voice channel (voice commands)
 `!test-voice` - Test voice functionality
-
 **Voice Features (Partially Implemented):**
 Voice commands are in development. The bot can join voice channels but full voice receiving requires additional integration.
-
 Your messages are processed through JARVIS AI."""
         await self._send_message(session.channel_id, help_text)
 
     async def _handle_status(self, session: DiscordSession, message_data: dict, text: str) -> None:
         """Handle status command."""
         stats = self.get_stats()
-        status_text = f"""📊 **JARVIS Discord Bot Status**
-
-🤖 Bot: {stats.get("bot_username", "Unknown")}
-🔄 Running: {"✅ Yes" if stats.get("running") else "❌ No"}
-💬 Active Sessions: {stats.get("active_sessions", 0)}
-
+        status_text = f"""**JARVIS Discord Bot Status**
+Bot: {stats.get("bot_username", "Unknown")}
+Running: {"Yes" if stats.get("running") else "No"}
+Active Sessions: {stats.get("active_sessions", 0)}
 **Your Session:**
-🆔 Channel: {session.channel_id}
-👤 User: {session.username or "Unknown"}
-💭 Messages: {len(session.messages)}
-🕐 Last Activity: {session.last_activity.strftime("%H:%M:%S")}"""
+Channel: {session.channel_id}
+User: {session.username or "Unknown"}
+Messages: {len(session.messages)}
+Last Activity: {session.last_activity.strftime("%H:%M:%S")}"""
         await self._send_message(session.channel_id, status_text)
 
     async def _handle_clear(self, session: DiscordSession, message_data: dict, text: str) -> None:
         """Handle clear command."""
         session.messages.clear()
-        await self._send_message(session.channel_id, "🗑️ Conversation history cleared!")
+        await self._send_message(session.channel_id, "Conversation history cleared!")
+
+    async def _get_user_voice_state(self, guild_id: str, user_id: str) -> dict | None:
+        """Get voice state for a specific user in a guild."""
+        if not self._http_client:
+            return None
+        try:
+            response = await self._http_client.get(
+                f"{self.API_URL}/guilds/{guild_id}/voice-states/{user_id}"
+            )
+            if response.status_code == 200:
+                return response.json()
+        except Exception as e:
+            log.debug(f"[DISCORD] Failed to get user voice state: {e}")
+        return None
 
     async def _handle_join_voice(
         self, session: DiscordSession, message_data: dict, text: str
@@ -1015,45 +961,45 @@ Your messages are processed through JARVIS AI."""
         """Handle join voice channel command."""
         guild_id = session.guild_id
         if not guild_id:
-            await self._send_message(session.channel_id, "❌ This command only works in guilds.")
+            await self._send_message(session.channel_id, "This command only works in guilds.")
             return
 
-        # Parse channel ID from command (if provided)
         parts = text.split()
         channel_id = None
+
         if len(parts) > 1:
             channel_id = parts[1]
             log.debug(f"[DISCORD] Channel ID provided in command: {channel_id}")
+        else:
+            author_id = message_data.get("author", {}).get("id")
+            if author_id:
+                user_voice_state = await self._get_user_voice_state(guild_id, author_id)
+                if user_voice_state:
+                    channel_id = user_voice_state.get("channel_id")
+                    if channel_id:
+                        log.info(f"[DISCORD] Found user in voice channel: {channel_id}")
 
-        # If no channel ID provided, give clear instructions
         if not channel_id:
             await self._send_message(
                 session.channel_id,
-                "🔊 **How to Join a Voice Channel**\n\n"
-                "**Method 1 - Use Channel ID (Recommended):**\n"
-                "1. Enable Developer Mode in Discord (Settings → Advanced → Developer Mode)\n"
-                "2. Right-click on the voice channel you want to join\n"
-                "3. Click 'Copy ID'\n"
-                "4. Use the command: `!join [channel_id]`\n\n"
-                "**Method 2 - Manual Join:**\n"
-                "1. Manually drag the bot to a voice channel in Discord\n"
-                "2. The bot will automatically detect when it's moved to a voice channel\n\n"
-                "**Note:** Automatic detection of your current voice channel is limited due to Discord API restrictions.",
+                "You're not in a voice channel. Either:\n"
+                "1. Join a voice channel first, then use `!join`\n"
+                "2. Use `!join [channel_id]` with a specific channel ID\n\n"
+                "To get a channel ID: Enable Developer Mode, right-click voice channel, Copy ID",
             )
             return
 
-        # Try to join the voice channel using voice state update
         success = await self._update_voice_state(guild_id, channel_id)
         if success:
-            await self._send_message(session.channel_id, f"🔊 Joined voice channel <#{channel_id}>")
+            await self._send_message(session.channel_id, f"Joined voice channel <#{channel_id}>")
         else:
             await self._send_message(
                 session.channel_id,
-                f"❌ Failed to join voice channel <#{channel_id}>. Please check:\n"
-                "• The channel ID is correct\n"
-                "• The channel exists and is a voice channel\n"
-                "• The bot has permission to join the channel\n"
-                "• The channel is not full",
+                f"Failed to join voice channel <#{channel_id}>. Please check:\n"
+                "- The channel ID is correct\n"
+                "- The channel exists and is a voice channel\n"
+                "- The bot has permission to join the channel\n"
+                "- The channel is not full",
             )
 
     async def _handle_leave_voice(
@@ -1062,17 +1008,15 @@ Your messages are processed through JARVIS AI."""
         """Handle leave voice channel command."""
         guild_id = session.guild_id
         if not guild_id:
-            await self._send_message(session.channel_id, "❌ This command only works in guilds.")
+            await self._send_message(session.channel_id, "This command only works in guilds.")
             return
-
-        # Send voice state update with null channel_id to disconnect
         success = await self._update_voice_state(guild_id, None)
         if success:
-            await self._send_message(session.channel_id, "🔇 Left voice channel")
+            await self._send_message(session.channel_id, "Left voice channel")
         else:
             await self._send_message(
                 session.channel_id,
-                "❌ Failed to leave voice channel. There may be a connection issue.",
+                "Failed to leave voice channel. There may be a connection issue.",
             )
 
     async def _handle_listen_voice(
@@ -1081,126 +1025,47 @@ Your messages are processed through JARVIS AI."""
         """Handle listen to voice channel command."""
         guild_id = session.guild_id
         if not guild_id:
-            await self._send_message(session.channel_id, "❌ This command only works in guilds.")
+            await self._send_message(session.channel_id, "This command only works in guilds.")
             return
-
-        # Check if we're in a voice channel
         voice_state = await self._get_voice_state(guild_id)
         if not voice_state or not voice_state.get("channel_id"):
-            await self._send_message(
-                session.channel_id, "❌ Not in a voice channel. Use !join first."
-            )
+            await self._send_message(session.channel_id, "Not in a voice channel. Use !join first.")
             return
-
-        # In a full implementation, we would start listening to voice data here
-        # For now, we'll just send a message indicating the feature is in development
         await self._send_message(
-            session.channel_id, "👂 Listening to voice channel... (feature in development)"
+            session.channel_id, "Listening to voice channel... (feature in development)"
         )
-
-        # If we had discord-ext-voice-recv properly integrated, we would do something like:
-        # vc = await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
-        # vc.listen(voice_recv.BasicSink(self._handle_voice_data))
 
     async def _handle_test_voice(
         self, session: DiscordSession, message_data: dict, text: str
     ) -> None:
         """Test voice functionality."""
-        # Check if STT is available
         if self._stt is None:
-            await self._send_message(session.channel_id, "❌ STT is not available")
+            await self._send_message(session.channel_id, "STT is not available")
             return
-
-        # Test STT functionality
         try:
-            # Create a simple test audio (silence)
             import numpy as np
 
-            test_audio = np.zeros(16000, dtype=np.float32)  # 1 second of silence
-
-            # Test transcription
+            test_audio = np.zeros(16000, dtype=np.float32)
             transcription = await self._stt.transcribe_async(test_audio)
-
             if HAS_VOICE_RECV:
-                status = "✅ discord-ext-voice-recv is available"
+                status = "discord-ext-voice-recv is available"
             else:
-                status = "⚠️ discord-ext-voice-recv is not available (install with: pip install discord-ext-voice-recv)"
-
-            response = f"""🔊 **Voice Functionality Test**
-            
+                status = "discord-ext-voice-recv is not available (install with: pip install discord-ext-voice-recv)"
+            response = f"""**Voice Functionality Test**
 {status}
 STT Model: Loaded
 Test Transcription: "{transcription or "(silent)"}"
-
 **Voice Commands:**
 `!join [channel_id]` - Join a voice channel
 `!leave` - Leave current voice channel
 `!listen` - Listen to voice channel (voice commands)
-
-Voice functionality is partially implemented. Full voice receiving requires discord-ext-voice-recv integration."""
-
+**Current Status:**
+Gateway WebSocket: {self._running}
+Voice Player: {self._voice_player is not None}
+STT: {self._stt is not None}"""
             await self._send_message(session.channel_id, response)
         except Exception as e:
-            await self._send_message(session.channel_id, f"❌ Voice test failed: {e}")
-
-    async def _process_voice_command(
-        self, guild_id: str, channel_id: str, user_id: str, audio_data: bytes
-    ) -> None:
-        """Process voice command from a user in a voice channel."""
-        # Check if STT is available
-        if self._stt is None:
-            log.error("[DISCORD] STT is not available for voice command processing")
-            return
-
-        try:
-            log.info(f"[DISCORD] Processing voice command from user {user_id} in guild {guild_id}")
-
-            # Convert audio data to text using STT
-            import numpy as np
-
-            # Convert bytes to numpy array (assuming 16-bit PCM at 48kHz)
-            # This is a simplified conversion - in reality, we'd need to handle the actual audio format
-            audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
-
-            # Transcribe the audio
-            transcription = await self._stt.transcribe_async(audio_array)
-
-            if transcription and transcription.strip():
-                log.info(f"[DISCORD] Transcribed voice command: {transcription}")
-
-                # Get or create session for this channel
-                session = self._get_or_create_session(
-                    channel_id=channel_id,
-                    guild_id=guild_id,
-                    user_id=user_id,
-                )
-
-                # Add transcription to session messages
-                session.add_message("user", transcription)
-
-                # Process through JARVIS if available
-                if self.jarvis:
-                    await self._process_message_through_jarvis(
-                        session, transcription, channel_id, None
-                    )
-                else:
-                    # Fallback response if JARVIS is not available
-                    await self._send_message(channel_id, f"I heard: {transcription}")
-            else:
-                log.info("[DISCORD] No transcription from voice command")
-
-        except Exception as e:
-            log.error(f"[DISCORD] Error processing voice command: {e}")
+            await self._send_message(session.channel_id, f"Voice test failed: {e}")
 
 
 discord_bot_handler = DiscordBotHandler()
-
-
-async def start_discord_bot(jarvis_server: "JarvisServer | None" = None) -> bool:
-    """Convenience function to start the Discord bot."""
-    return await discord_bot_handler.start(jarvis_server)
-
-
-async def stop_discord_bot() -> None:
-    """Convenience function to stop the Discord bot."""
-    await discord_bot_handler.stop()
