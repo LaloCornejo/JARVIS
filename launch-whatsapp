@@ -1,0 +1,71 @@
+#!/bin/bash
+# JARVIS + WhatsApp launcher
+
+cd "$(dirname "$0")"
+
+echo "========================================="
+echo "   JARVIS with WhatsApp Integration"
+echo "========================================="
+echo ""
+
+# Check Node.js
+if ! command -v node &> /dev/null; then
+    echo "[ERROR] Node.js not found. Install from https://nodejs.org"
+    exit 1
+fi
+
+# Check Python
+if ! command -v python &> /dev/null; then
+    echo "[ERROR] Python not found. Install from https://python.org"
+    exit 1
+fi
+
+# Install deps if needed
+if [ ! -d "services/whatsapp-bailey/node_modules" ]; then
+    echo "[SETUP] Installing WhatsApp dependencies..."
+    cd services/whatsapp-bailey
+    npm install
+    cd ../..
+    echo "[SETUP] Done"
+    echo ""
+fi
+
+# Kill any existing node processes
+pkill -f "whatsapp-bailey" 2>/dev/null
+
+echo "[START] Launching WhatsApp service..."
+echo "[INFO] QR code will appear - scan with WhatsApp app"
+echo "========================================="
+
+# Start WhatsApp in background
+cd services/whatsapp-bailey
+node server.js &
+WHATSAPP_PID=$!
+cd ../..
+
+# Wait for WhatsApp to show QR
+sleep 5
+
+echo ""
+echo ">>> WHATSAPP SETUP <<<"
+echo "1. Check above for QR code"
+echo "2. Open WhatsApp on your phone"
+echo "3. Settings > Linked Devices > Link a Device"
+echo "4. Scan the QR code"
+echo "5. Wait for 'Connected' message"
+echo ""
+read -p "Press Enter when WhatsApp is connected..."
+echo ""
+
+echo "[START] Launching JARVIS..."
+echo "========================================="
+echo ""
+
+# Start JARVIS (foreground)
+python jarvis_wrapper.py
+
+# Cleanup
+echo ""
+echo "[SHUTDOWN] Stopping WhatsApp service..."
+kill $WHATSAPP_PID 2>/dev/null
+echo "[SHUTDOWN] Done."
