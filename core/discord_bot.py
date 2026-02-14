@@ -537,6 +537,47 @@ class DiscordBotHandler:
 
         await self._do_voice_server_connect(guild_id, data)
 
+    async def _do_voice_server_connect(self, guild_id: str, data: dict) -> None:
+        endpoint = data.get("endpoint")
+        token = data.get("token")
+        session_id = self._voice_session_ids.get(guild_id)
+
+        if not endpoint or not token or not session_id:
+            log.error(
+                f"[DISCORD] Missing voice connection params - endpoint: {endpoint}, token: {token}, session_id: {session_id}"
+            )
+            return
+
+        if not self._bot_user_id:
+            log.error("[DISCORD] Bot user ID not available for voice connection")
+            return
+
+        log.info(f"[DISCORD] Connecting to voice WebSocket for guild {guild_id}")
+
+        try:
+            if VOICE_AVAILABLE and VoiceWebSocket:
+                voice_ws = VoiceWebSocket()
+                success = await voice_ws.connect(
+                    endpoint=endpoint,
+                    token=token,
+                    server_id=guild_id,
+                    user_id=self._bot_user_id,
+                    session_id=session_id,
+                )
+                if success:
+                    self._voice_websockets[guild_id] = voice_ws
+                    log.info(f"[DISCORD] Voice WebSocket connected for guild {guild_id}")
+                else:
+                    log.error(f"[DISCORD] Voice WebSocket connection failed for guild {guild_id}")
+            else:
+                log.warning("[DISCORD] VoiceWebSocket not available, storing raw websocket")
+                voice_ws = await websockets.connect(f"wss://{endpoint}/?v=4")
+                self._voice_websockets[guild_id] = voice_ws
+
+        except Exception as e:
+            log.error(f"[DISCORD] Failed to connect to voice WebSocket: {e}", exc_info=True)
+            return
+
     def _cleanup_stale_pending_updates(self) -> None:
         if not self._pending_voice_server_updates:
             return

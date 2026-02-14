@@ -35,7 +35,7 @@ echo.
 )
 
 :: Kill any existing node processes
-taskkill /F /IM node.exe >nul 2>&1
+REM taskkill /F /IM node.exe >nul 2>&1
 timeout /t 1 /nobreak >nul
 
 echo [START] Launching WhatsApp service...

@@ -17,8 +17,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import socket
 import struct
+import uuid
 from typing import Any, Callable, Optional
 
 import websockets
@@ -96,9 +98,8 @@ class VoiceWebSocket:
             log.error("[VOICE_WS] Cannot connect: token is empty or None")
             return False
 
-        if ":" in endpoint:
-            endpoint = endpoint.split(":")[0]
         ws_url = f"wss://{endpoint}?v=4"
+        log.info(f"[VOICE_WS] Full endpoint URL: {ws_url}")
 
         log.info(
             f"[VOICE_WS] Connecting with server_id={server_id}, user_id={user_id}, "
@@ -259,58 +260,118 @@ class VoiceWebSocket:
         """Perform UDP IP discovery to get our public IP/port."""
         if not self.voice_ip or not self.voice_port:
             log.error("[VOICE_WS] No voice server info for IP discovery")
+            await self._fallback_ip_discovery()
             return
 
+        for attempt in range(3):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.settimeout(5.0)
+
+                packet = struct.pack(
+                    "!HHII",
+                    0x0000,
+                    70,
+                    self.ssrc,
+                    0,
+                )
+                packet += b"\x00" * 62
+
+                log.debug(
+                    f"[VOICE_WS] IP discovery attempt {attempt + 1} to {self.voice_ip}:{self.voice_port}"
+                )
+
+                sock.sendto(packet, (self.voice_ip, self.voice_port))
+
+                response, addr = sock.recvfrom(70)
+                sock.close()
+
+                if len(response) >= 74:
+                    ip_bytes = response[8:72]
+                    ip_end = ip_bytes.find(b"\x00")
+                    if ip_end != -1:
+                        ip_bytes = ip_bytes[:ip_end]
+                    self.public_ip = ip_bytes.decode("utf-8")
+                    self.public_port = struct.unpack("!H", response[72:74])[0]
+                    log.info(
+                        f"[VOICE_WS] IP discovery complete: {self.public_ip}:{self.public_port}"
+                    )
+                    return
+                else:
+                    log.error(f"[VOICE_WS] Invalid IP discovery response: {len(response)} bytes")
+
+            except Exception as e:
+                log.error(f"[VOICE_WS] IP discovery attempt {attempt + 1} failed: {e}")
+
+        log.warning("[VOICE_WS] All IP discovery attempts failed, using fallback")
+        await self._fallback_ip_discovery()
+
+    async def _fallback_ip_discovery(self) -> None:
+        log.info("[VOICE_WS] Using fallback IP discovery")
         try:
-            # Create UDP socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(5.0)
+            stun_servers = [
+                ("stun.l.google.com", 19302),
+                ("stun1.l.google.com", 19302),
+            ]
+            public_ip = None
+            public_port = None
 
-            # Build discovery packet: 70 bytes
-            # - 2 bytes: zero
-            # - 2 bytes: length (70)
-            # - 4 bytes: ssrc
-            # - 66 bytes: zero padding
-            packet = struct.pack(
-                "!HHII",
-                0x0000,  # type
-                70,  # length
-                self.ssrc,  # ssrc
-                0,  # padding
+            for stun_host, stun_port in stun_servers:
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    sock.settimeout(3.0)
+                    sock.bind(("", 0))
+                    local_port = sock.getsockname()[1]
+
+                    stun_request = b"\x00\x01\x00\x00\x00\x00\x00\x00"
+                    sock.sendto(stun_request, (stun_host, stun_port))
+
+                    try:
+                        response, _ = sock.recvfrom(1024)
+                        if len(response) >= 20:
+                            public_ip = ".".join(str(b) for b in response[4:8])
+                            mapped_port = struct.unpack("!H", response[2:4])[0]
+                            public_port = mapped_port if mapped_port != 0 else local_port
+                            sock.close()
+                            log.info(f"[VOICE_WS] STUN success: {public_ip}:{public_port}")
+                            break
+                    except socket.timeout:
+                        sock.close()
+                        continue
+                except Exception as e:
+                    log.debug(f"[VOICE_WS] STUN server {stun_host} failed: {e}")
+                    continue
+
+            if not public_ip:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(("", 0))
+                local_port = sock.getsockname()[1]
+                sock.close()
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                public_ip = s.getsockname()[0]
+                s.close()
+                public_port = local_port
+
+            self.public_ip = public_ip
+            self.public_port = public_port
+            log.info(
+                f"[VOICE_WS] Fallback IP discovery complete: {self.public_ip}:{self.public_port}"
             )
-            packet += b"\x00" * 62  # rest of padding
-
-            log.debug(f"[VOICE_WS] Sending IP discovery to {self.voice_ip}:{self.voice_port}")
-
-            # Send to voice server
-            sock.sendto(packet, (self.voice_ip, self.voice_port))
-
-            # Receive response
-            response, addr = sock.recvfrom(70)
-            sock.close()
-
-            if len(response) >= 74:
-                # Parse response: ip as null-terminated string starting at byte 8
-                ip_bytes = response[8:72]
-                ip_end = ip_bytes.find(b"\x00")
-                if ip_end != -1:
-                    ip_bytes = ip_bytes[:ip_end]
-                self.public_ip = ip_bytes.decode("utf-8")
-                self.public_port = struct.unpack("!H", response[72:74])[0]
-                log.info(f"[VOICE_WS] IP discovery complete: {self.public_ip}:{self.public_port}")
-            else:
-                log.error(f"[VOICE_WS] Invalid IP discovery response: {len(response)} bytes")
-
         except Exception as e:
-            log.error(f"[VOICE_WS] IP discovery failed: {e}")
-            # Fallback: use local socket
-            self.public_ip = "0.0.0.0"
-            self.public_port = 0
+            log.error(f"[VOICE_WS] Fallback IP discovery also failed: {e}")
+            self.public_ip = "127.0.0.1"
+            self.public_port = random.randint(10000, 60000)
 
     async def _send_select_protocol(self) -> None:
         """Send Select Protocol payload."""
-        # Choose best available mode
-        if "xsalsa20_poly1305_lite" in self.modes:
+        if "aead_aes256_gcm_rtpsize" in self.modes:
+            self.mode = "aead_aes256_gcm_rtpsize"
+        elif "aead_xchacha20_poly1305_rtpsize" in self.modes:
+            self.mode = "aead_xchacha20_poly1305_rtpsize"
+        elif "xsalsa20_poly1305_lite" in self.modes:
             self.mode = "xsalsa20_poly1305_lite"
         elif "xsalsa20_poly1305_suffix" in self.modes:
             self.mode = "xsalsa20_poly1305_suffix"
@@ -329,8 +390,10 @@ class VoiceWebSocket:
                     "port": self.public_port or 0,
                     "mode": self.mode,
                 },
+                "rtc_connection_id": str(uuid.uuid4()),
             },
         }
+        log.info(f"[VOICE_WS] Select Protocol payload: {payload}")
         await self._send(payload)
         log.debug(f"[VOICE_WS] Sent Select Protocol: {self.mode}")
 
@@ -349,6 +412,20 @@ class VoiceWebSocket:
                 self.on_session_description(self.secret_key)
             except Exception as e:
                 log.error(f"[VOICE_WS] Error in on_session_description callback: {e}")
+
+        await self._send_speaking()
+
+    async def _send_speaking(self) -> None:
+        payload = {
+            "op": 5,
+            "d": {
+                "speaking": 1,
+                "delay": 0,
+                "ssrc": self.ssrc,
+            },
+        }
+        await self._send(payload)
+        log.info(f"[VOICE_WS] Sent Speaking indicator (ssrc={self.ssrc})")
 
     async def _heartbeat_loop(self) -> None:
         """Send periodic heartbeats."""

@@ -128,7 +128,7 @@ async function connectToWhatsApp() {
           content: messageContent,
           timestamp: msg.messageTimestamp,
           message_id: msg.key.id
-        }, { timeout: 10000 });
+        }, { timeout: 30000 });
       } catch (error) {
         console.error('[WhatsApp] Failed to forward message to Python:', error.message);
       }
