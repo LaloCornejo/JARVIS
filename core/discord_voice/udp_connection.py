@@ -199,7 +199,6 @@ class UDPVoiceConnection:
                 break
 
     async def disconnect(self) -> None:
-        """Disconnect from voice server."""
         self._running = False
         self.connected = False
 
@@ -217,5 +216,64 @@ class UDPVoiceConnection:
         log.info("UDP voice connection closed")
 
     def is_connected(self) -> bool:
-        """Check if connected to voice server."""
         return self.connected and self.socket is not None
+
+    async def start_receiving(
+        self,
+        on_audio: callable = None,
+        on_speaking: callable = None,
+    ) -> None:
+        if not self.socket or not self.connected:
+            log.error("Cannot start receiving: not connected")
+            return
+
+        self._on_audio = on_audio
+        self._on_speaking = on_speaking
+        self._receiving = True
+        log.info("Starting voice receive loop")
+
+        asyncio.create_task(self._receive_loop())
+
+    async def _receive_loop(self) -> None:
+        self.socket.settimeout(1.0)
+
+        while self._running and self._receiving:
+            try:
+                data, addr = await asyncio.get_event_loop().run_in_executor(
+                    None, self.socket.recvfrom, 4096
+                )
+
+                if len(data) < 12:
+                    continue
+
+                header = data[:12]
+                payload = data[12:]
+
+                if len(payload) < 4:
+                    continue
+
+                version = (header[0] >> 6) & 0x3
+                payload_type = header[1] & 0x7F
+
+                if payload_type == 0x74:
+                    user_id = int.from_bytes(payload[:4], "little")
+                    if self._on_speaking:
+                        speaking = (payload[4] & 0x1) != 0
+                        asyncio.create_task(self._on_speaking(user_id, speaking))
+
+                elif payload_type == 0x78:
+                    if self._on_audio and len(payload) > 0:
+                        timestamp = int.from_bytes(header[8:12], "little")
+                        asyncio.create_task(self._on_audio(payload, 0, timestamp))
+
+            except socket.timeout:
+                continue
+            except Exception as e:
+                if self._running:
+                    log.error(f"Error in receive loop: {e}")
+                break
+
+        log.info("Voice receive loop ended")
+
+    def stop_receiving(self) -> None:
+        self._receiving = False

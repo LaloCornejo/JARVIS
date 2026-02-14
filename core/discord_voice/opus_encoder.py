@@ -143,30 +143,67 @@ class OpusEncoder:
 
 
 def resample_audio(audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
-    """Resample audio to target sample rate.
-
-    Args:
-        audio: Input audio array
-        orig_sr: Original sample rate
-        target_sr: Target sample rate
-
-    Returns:
-        Resampled audio array
-    """
     try:
         from scipy import signal
 
-        # Calculate new length
         ratio = target_sr / orig_sr
         new_length = int(len(audio) * ratio)
-
-        # Resample
         resampled = signal.resample(audio, new_length)
         return resampled.astype(audio.dtype)
     except ImportError:
         log.warning("scipy not available for resampling, using linear interpolation")
-        # Fallback to simple linear interpolation
         ratio = target_sr / orig_sr
         new_length = int(len(audio) * ratio)
         indices = np.linspace(0, len(audio) - 1, new_length)
         return np.interp(indices, np.arange(len(audio)), audio).astype(audio.dtype)
+
+
+class OpusDecoder:
+    DISCORD_SAMPLE_RATE = 48000
+    DISCORD_FRAME_SIZE = 960
+    DISCORD_CHANNELS = 1
+
+    def __init__(self):
+        self._decoder: Optional[object] = None
+        self._available = False
+        self._init_decoder()
+
+    def is_available(self) -> bool:
+        return self._available
+
+    def _init_decoder(self) -> None:
+        try:
+            import opuslib
+
+            self._decoder = opuslib.Decoder(self.DISCORD_SAMPLE_RATE, self.DISCORD_CHANNELS)
+            self._available = True
+            log.info("Opus decoder initialized")
+        except ImportError:
+            log.warning("opuslib not installed. Run: pip install opuslib-next")
+            self._available = False
+        except Exception as e:
+            log.error(f"Failed to initialize Opus decoder: {e}")
+            self._available = False
+
+    def decode(self, opus_data: bytes) -> Optional[np.ndarray]:
+        if not self._available or self._decoder is None:
+            return None
+
+        try:
+            pcm_data = self._decoder.decode(opus_data, self.DISCORD_FRAME_SIZE, False)
+            if pcm_data:
+                return np.frombuffer(pcm_data, dtype=np.int16)
+            return None
+        except Exception as e:
+            log.error(f"Failed to decode Opus: {e}")
+            return None
+
+    def decode_bytes(self, opus_data: bytes) -> Optional[bytes]:
+        if not self._available or self._decoder is None:
+            return None
+
+        try:
+            return self._decoder.decode(opus_data, self.DISCORD_FRAME_SIZE, False)
+        except Exception as e:
+            log.error(f"Failed to decode Opus: {e}")
+            return None

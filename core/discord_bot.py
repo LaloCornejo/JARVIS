@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable
 
+import numpy as np
+
 import httpx
 import websockets
 
@@ -175,6 +177,7 @@ class DiscordBotHandler:
             "!join": self._handle_join_voice,
             "!leave": self._handle_leave_voice,
             "!listen": self._handle_listen_voice,
+            "!stoplisten": self._handle_stop_listen_voice,
             "!test-voice": self._handle_test_voice,
         }
 
@@ -226,6 +229,8 @@ class DiscordBotHandler:
         if VOICE_AVAILABLE and DiscordTTSPlayer and self.jarvis and hasattr(self.jarvis, "tts"):
             try:
                 self._voice_player = DiscordTTSPlayer(self.jarvis.tts)
+                if self._stt:
+                    self._voice_player.set_transcription_callback(self._handle_voice_transcription)
                 log.info("[DISCORD] Voice player initialized successfully")
             except Exception as e:
                 log.error(f"[DISCORD] Failed to initialize voice player: {e}", exc_info=True)
@@ -536,6 +541,88 @@ class DiscordBotHandler:
             return
 
         await self._do_voice_server_connect(guild_id, data)
+
+    async def _do_voice_server_connect(self, guild_id: str, data: dict) -> None:
+        endpoint = data.get("endpoint")
+        token = data.get("token")
+
+        if not endpoint or not token:
+            log.error(f"[DISCORD] Missing endpoint or token for voice connection")
+            return
+
+        if not self._bot_user_id:
+            log.error("[DISCORD] Bot user ID not available")
+            return
+
+        session_id = self._voice_session_ids.get(guild_id)
+        if not session_id:
+            log.error(f"[DISCORD] No session_id for guild {guild_id}")
+            return
+
+        log.info(f"[DISCORD] Connecting to voice server for guild {guild_id}")
+
+        voice_ws = VoiceWebSocket()
+        connection_ready = asyncio.Future()
+
+        async def on_session_description(secret_key: bytes) -> None:
+            log.info(
+                f"[DISCORD] Voice session ready for guild {guild_id}, connecting TTS player..."
+            )
+
+            if self._voice_player:
+                success = await self._voice_player.connect_to_voice(
+                    guild_id=guild_id,
+                    endpoint=endpoint,
+                    token=token,
+                    session_id=session_id,
+                    user_id=self._bot_user_id,
+                    secret_key=secret_key,
+                    ssrc=voice_ws.ssrc,
+                )
+                if success:
+                    log.info(f"[DISCORD] TTS player connected for guild {guild_id}")
+                    if not connection_ready.done():
+                        connection_ready.set_result(True)
+                else:
+                    log.error(f"[DISCORD] Failed to connect TTS player for guild {guild_id}")
+                    if not connection_ready.done():
+                        connection_ready.set_exception(Exception("TTS player connection failed"))
+            else:
+                log.error(f"[DISCORD] No voice player available for guild {guild_id}")
+                if not connection_ready.done():
+                    connection_ready.set_exception(Exception("No voice player"))
+
+        voice_ws.on_session_description = on_session_description
+
+        try:
+            ws_connected = await voice_ws.connect(
+                endpoint=endpoint,
+                token=token,
+                server_id=guild_id,
+                user_id=self._bot_user_id,
+                session_id=session_id,
+            )
+
+            if not ws_connected:
+                log.error(f"[DISCORD] Failed to connect voice WebSocket for guild {guild_id}")
+                return
+
+            self._voice_websockets[guild_id] = voice_ws
+
+            try:
+                await asyncio.wait_for(connection_ready, timeout=10.0)
+                log.info(f"[DISCORD] Voice connection established for guild {guild_id}")
+            except asyncio.TimeoutError:
+                log.error(f"[DISCORD] Voice connection timeout for guild {guild_id}")
+                await voice_ws.disconnect()
+                if guild_id in self._voice_websockets:
+                    del self._voice_websockets[guild_id]
+
+        except Exception as e:
+            log.error(
+                f"[DISCORD] Error establishing voice connection for guild {guild_id}: {e}",
+                exc_info=True,
+            )
 
     def _cleanup_stale_pending_updates(self) -> None:
         if not self._pending_voice_server_updates:
@@ -897,7 +984,6 @@ class DiscordBotHandler:
             return False
 
     async def _handle_help(self, session: DiscordSession, message_data: dict, text: str) -> None:
-        """Handle help command."""
         help_text = """**JARVIS Discord Bot Help**
 Just send me a message and I'll respond! I can:
 Search the web
@@ -915,10 +1001,9 @@ And much more!
 `!clear` - Clear conversation history
 `!join [channel_id]` - Join a voice channel (requires channel ID - right-click channel - Copy ID)
 `!leave` - Leave current voice channel
-`!listen` - Listen to voice channel (voice commands)
+`!listen` - Start listening to voice channel
+`!stoplisten` - Stop listening to voice channel
 `!test-voice` - Test voice functionality
-**Voice Features (Partially Implemented):**
-Voice commands are in development. The bot can join voice channels but full voice receiving requires additional integration.
 Your messages are processed through JARVIS AI."""
         await self._send_message(session.channel_id, help_text)
 
@@ -1031,9 +1116,74 @@ Last Activity: {session.last_activity.strftime("%H:%M:%S")}"""
         if not voice_state or not voice_state.get("channel_id"):
             await self._send_message(session.channel_id, "Not in a voice channel. Use !join first.")
             return
-        await self._send_message(
-            session.channel_id, "Listening to voice channel... (feature in development)"
-        )
+        if not self._voice_player:
+            await self._send_message(session.channel_id, "Voice player not available")
+            return
+
+        if not self._stt:
+            await self._send_message(session.channel_id, "STT not available")
+            return
+
+        success = await self._voice_player.start_voice_receive(guild_id)
+        if success:
+            await self._send_message(
+                session.channel_id, "Listening to voice channel... Speak and I'll respond!"
+            )
+        else:
+            await self._send_message(session.channel_id, "Failed to start voice listening")
+
+    async def _handle_voice_transcription(
+        self, audio: np.ndarray, user_id: int, guild_id: str
+    ) -> None:
+        if not self._stt or not self.jarvis:
+            return
+
+        try:
+            log.info(f"[DISCORD] Processing voice from user {user_id} in guild {guild_id}")
+            audio_float = audio.astype(np.float32) / 32767.0
+            transcription = await self._stt.transcribe_async(audio_float)
+
+            if transcription and len(transcription.strip()) > 2:
+                log.info(f"[DISCORD] Transcription: {transcription}")
+
+                session = None
+                for s in self._sessions.values():
+                    if s.guild_id == guild_id:
+                        session = s
+                        break
+
+                if not session:
+                    channel_id = None
+                    for s in self._sessions.values():
+                        if s.guild_id == guild_id:
+                            channel_id = s.channel_id
+                            break
+                    if channel_id:
+                        session = self._get_or_create_session(
+                            channel_id=channel_id, guild_id=guild_id
+                        )
+
+                if session:
+                    await self._process_message_through_jarvis(
+                        session, transcription, session.channel_id, None
+                    )
+        except Exception as e:
+            log.error(f"[DISCORD] Error in voice transcription: {e}", exc_info=True)
+
+    async def _handle_stop_listen_voice(
+        self, session: DiscordSession, message_data: dict, text: str
+    ) -> None:
+        guild_id = session.guild_id
+        if not guild_id:
+            await self._send_message(session.channel_id, "This command only works in guilds.")
+            return
+
+        if not self._voice_player:
+            await self._send_message(session.channel_id, "Voice player not available")
+            return
+
+        await self._voice_player.stop_voice_receive(guild_id)
+        await self._send_message(session.channel_id, "Stopped listening to voice channel")
 
     async def _handle_test_voice(
         self, session: DiscordSession, message_data: dict, text: str

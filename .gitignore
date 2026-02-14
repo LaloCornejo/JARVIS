@@ -53,7 +53,7 @@ target/
 # Debug files
 *.pdb
 
-# Large model files or assets if any
+# Large model files or assets if any 
 *.pth
 *.dll
 
@@ -68,3 +68,8 @@ uv.lock
 
 # public 
 public/
+
+# private
+node_modules/
+
+auth_info_baileys/
