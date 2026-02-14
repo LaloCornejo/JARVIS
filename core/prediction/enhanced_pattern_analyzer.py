@@ -544,8 +544,8 @@ class EnhancedPatternAnalyzer(PatternAnalyzer):
                             recommendation=f"Model-based prediction for {pattern.action}",
                         )
                         matches.append(match)
-                    except:
-                        pass
+                    except Exception as e:
+                        log.debug(f"Pattern match error: {e}")
 
         except Exception as e:
             log.error(f"Error in model-based prediction: {e}")

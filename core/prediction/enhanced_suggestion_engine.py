@@ -375,7 +375,7 @@ class EnhancedSmartSuggestionEngine(SmartSuggestionEngine):
                     threshold = float(trigger.split(">")[1])
                     if context.stress_level and context.stress_level > threshold:
                         return True
-                except:
+                except Exception:
                     pass
 
             # Handle focus level triggers
@@ -384,7 +384,7 @@ class EnhancedSmartSuggestionEngine(SmartSuggestionEngine):
                     threshold = float(trigger.split("<")[1])
                     if context.focus_level and context.focus_level < threshold:
                         return True
-                except:
+                except Exception:
                     pass
 
             # Handle productivity trend triggers
@@ -401,7 +401,7 @@ class EnhancedSmartSuggestionEngine(SmartSuggestionEngine):
                     # Simulate social interaction tracking
                     # In a real implementation, this would check actual social interactions
                     return False  # Placeholder
-                except:
+                except Exception:
                     pass
 
             # Handle environmental triggers

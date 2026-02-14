@@ -78,6 +78,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for production monitoring"""
+    from core.security.rate_limit import rate_limiter_manager
+
+    return {
+        "status": "healthy",
+        "services": {
+            "telegram": telegram_bot_handler.is_running() if telegram_bot_handler else False,
+            "discord": discord_bot_handler.is_running() if discord_bot_handler else False,
+            "whatsapp": whatsapp_bailey_client.is_running() if whatsapp_bailey_client else False,
+        },
+        "rate_limiting": rate_limiter_manager.get_limiters_status(),
+    }
+
+
 # Global server instance
 jarvis_server = JarvisServer()
 connected_clients: Set[WebSocket] = set()

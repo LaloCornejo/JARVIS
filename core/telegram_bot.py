@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Callable
 if TYPE_CHECKING:
     from jarvis.server import JarvisServer
 
+from core.security.rate_limit import RateLimitConfig, rate_limiter_manager
 from tools.integrations.telegram import get_telegram_client
 
 log = logging.getLogger(__name__)
@@ -96,7 +97,16 @@ class TelegramBotHandler:
             if env_ids:
                 self.allowed_chat_ids = set(id.strip() for id in env_ids.split(",") if id.strip())
             else:
-                self.allowed_chat_ids = None  # Allow all chats
+                # Security default: block all chats until explicitly configured
+                # Set TELEGRAM_ALLOWED_CHAT_IDS="*" to allow all (development only)
+                self.allowed_chat_ids = set()
+
+        # Check for explicit open access mode
+        self._allow_all_chats = os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "") == "*"
+        if self._allow_all_chats:
+            log.warning(
+                "[TELEGRAM] SECURITY WARNING: Allowing all Telegram chats. Set TELEGRAM_ALLOWED_CHAT_IDS to restrict access."
+            )
 
         self._running = False
         self._poll_task: asyncio.Task | None = None
@@ -116,6 +126,12 @@ class TelegramBotHandler:
         # Bot info
         self._bot_info: dict | None = None
         self._bot_username: str | None = None
+
+        # Rate limiting (10 requests per 30 seconds per chat)
+        self._rate_limiter = rate_limiter_manager.get_limiter(
+            "telegram",
+            RateLimitConfig(requests=10, window_seconds=30),
+        )
 
     async def start(self, jarvis_server: JarvisServer | None = None) -> bool:
         """Start the Telegram bot handler."""
@@ -138,6 +154,12 @@ class TelegramBotHandler:
 
         self._bot_username = self._bot_info.get("username")
         log.info(f"[TELEGRAM] Bot connected: @{self._bot_username}")
+
+        # Security check: warn if no chat restrictions configured
+        if not self.allowed_chat_ids and not self._allow_all_chats:
+            log.warning(
+                "[TELEGRAM] SECURITY: No allowed_chat_ids configured. Bot will NOT respond to any chats until TELEGRAM_ALLOWED_CHAT_IDS is set."
+            )
 
         # Get initial update offset (clear old messages)
         updates = await self.client.get_updates(limit=1)
@@ -242,8 +264,23 @@ class TelegramBotHandler:
         chat_title = chat.get("title") or chat.get("username")
 
         # Check if chat is allowed (if whitelist is configured)
-        if self.allowed_chat_ids and chat_id not in self.allowed_chat_ids:
+        # Allow if: explicit open access mode OR chat_id in allowed list
+        if (
+            not self._allow_all_chats
+            and self.allowed_chat_ids
+            and chat_id not in self.allowed_chat_ids
+        ):
             log.warning(f"[TELEGRAM] Ignoring message from unauthorized chat: {chat_id}")
+            return
+
+        # Rate limit check
+        allowed, blocked_until = await self._rate_limiter.is_allowed(str(chat_id))
+        if not allowed:
+            log.warning(f"[TELEGRAM] Rate limited chat: {chat_id}")
+            await self.client.send_message(
+                chat_id,
+                "Too many requests. Please wait a moment.",
+            )
             return
 
         # Get sender info

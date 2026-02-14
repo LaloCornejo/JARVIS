@@ -25,6 +25,17 @@ from tools.enhanced import (
     ListWorkflowsTool,
     RecallEpisodicMemoryTool,
 )
+from tools.memory import (
+    AddEntityTool,
+    AddRelationshipTool,
+    FindEntityPathTool,
+    ForgetMemoryTool,
+    GetKnowledgeStatsTool,
+    ListMemoryCategoresTool,
+    QueryKnowledgeGraphTool,
+    RecallMemoryTool,
+    StoreMemoryTool,
+)
 
 # DISABLED: MCP filesystem server provides these tools
 # from tools.files import (
@@ -461,6 +472,11 @@ TOOL_CATEGORIES = {
             "recall_memory",
             "forget_memory",
             "list_memory_categories",
+            "add_knowledge_entity",
+            "add_knowledge_relationship",
+            "query_knowledge_graph",
+            "find_entity_path",
+            "get_knowledge_stats",
         ],
         "keywords": [
             "remember",
@@ -470,6 +486,11 @@ TOOL_CATEGORIES = {
             "store",
             "save",
             "memorize",
+            "knowledge",
+            "graph",
+            "entity",
+            "relationship",
+            "connection",
         ],
     },
     "screenshot": {
@@ -997,6 +1018,12 @@ class ToolRegistry:
             GetSuggestionsTool(),  # Get smart suggestions
             CheckAnomaliesTool(),
             GetConversationHistoryTool(),
+            # Knowledge Graph tools
+            AddEntityTool(),
+            AddRelationshipTool(),
+            QueryKnowledgeGraphTool(),
+            FindEntityPathTool(),
+            GetKnowledgeStatsTool(),
         ]
         for tool in default_tools:
             self.register(tool)

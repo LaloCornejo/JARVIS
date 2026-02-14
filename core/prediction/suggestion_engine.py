@@ -391,7 +391,7 @@ class SmartSuggestionEngine:
                     threshold = int(trigger.split("<")[1].replace("%", ""))
                     # Would need actual battery level
                     return False
-                except:
+                except Exception:
                     pass
             elif trigger.startswith("work_duration>"):
                 # Would need work duration tracking
