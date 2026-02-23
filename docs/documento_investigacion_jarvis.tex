@@ -1,0 +1,482 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{tocloft}
+
+% Configuración de márgenes
+\geometry{margin=2.5cm}
+
+% Configuración de colores
+\definecolor{primary}{RGB}{0, 102, 204}
+\definecolor{secondary}{RGB}{51, 51, 51}
+\definecolor{accent}{RGB}{255, 153, 0}
+
+% Configuración de hyperlinks
+\hypersetup{
+    colorlinks=true,
+    linkcolor=primary,
+    filecolor=magenta,
+    urlcolor=blue,
+    citecolor=primary
+}
+
+% Configuración de headers
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{JARVIS - Asistente Personal con IA}
+\lhead{Documento de Investigación}
+\cfoot{\thepage}
+
+% Configuración de listings para código
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!10}
+}
+
+\begin{document}
+
+% Portada
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+    
+    {\Huge\bfseries DOCUMENTO DE DEFINICIÓN\\DEL TEMA DE INVESTIGACIÓN\par}
+    \vspace{1.5cm}
+    
+    {\LARGE\textcolor{primary}{Proyecto JARVIS}\par}
+    \vspace{0.5cm}
+    {\Large Asistente Personal con Inteligencia Artificial\par}
+    
+    \vspace{2cm}
+    
+    \includegraphics[width=0.3\textwidth]{example-image-a}
+    
+    \vspace{2cm}
+    
+    {\large\textbf{Asignatura:} Metodologia de la Investigacion\par}
+    \vspace{0.5cm}    
+    \vfill
+    
+    {\large Febrero 2026\par}
+\end{titlepage}
+
+% Índice
+\tableofcontents
+\newpage
+
+% ==========================================
+\section{Lista de Temas de Interés (Relacionados con IA y Asistentes)}
+% ==========================================
+
+Los siguientes temas representan áreas de interés relacionadas con el desarrollo de asistentes personales basados en Inteligencia Artificial, cada uno abordando diferentes aspectos tecnológicos y de aplicación:
+
+\begin{enumerate}[label=\arabic*.]
+    \item \textbf{Implementación de Procesamiento de Lenguaje Natural (NLP) en entornos locales}
+    \begin{itemize}
+        \item Uso de modelos de lenguaje locales (Ollama, Whisper) para procesamiento de voz y texto
+        \item Transcripción de voz a texto mediante Faster-Whisper con soporte CUDA
+        \item Generación de respuestas naturales sin dependencia de servicios en la nube
+    \end{itemize}
+    
+    \item \textbf{Automatización de tareas rutinarias mediante agentes inteligentes}
+    \begin{itemize}
+        \item Sistema multi-agente con roles especializados (código, investigación, creatividad, planificación)
+        \item Orquestación de agentes para tareas complejas que requieren múltiples competencias
+        \item Ejecución autónoma de flujos de trabajo predefinidos
+    \end{itemize}
+    
+    \item \textbf{Integración de modelos de lenguaje (LLM) en la organización de agendas personales}
+    \begin{itemize}
+        \item Conexión con calendarios (Google Calendar) para gestión de eventos
+        \item Integración con servicios de productividad (Obsidian, Gmail, Discord, Telegram, WhatsApp)
+        \item Monitoreo de tiempo en pantalla y análisis de productividad
+    \end{itemize}
+    
+    \item \textbf{Seguridad y privacidad de datos en asistentes virtuales domésticos}
+    \begin{itemize}
+        \item Enfoque ``local-first'' para procesamiento de datos sensibles
+        \item Sistema de permisos y aprobación para herramientas críticas
+        \item Memoria encriptada para almacenamiento seguro de información personal
+    \end{itemize}
+    
+    \item \textbf{Sistemas de memoria semántica y episódica para asistentes de IA}
+    \begin{itemize}
+        \item Memoria vectorial con LanceDB para búsqueda semántica
+        \item Memoria episódica para recuperación de conversaciones y experiencias pasadas
+        \item Grafos de conocimiento para relaciones entre entidades
+    \end{itemize}
+    
+    \item \textbf{Interfaces multimodales de interacción humano-computadora}
+    \begin{itemize}
+        \item Detección de palabra de activación (``Hey JARVIS'')
+        \item Síntesis de voz con XTTS para respuestas naturales
+        \item Integración con navegadores web mediante Playwright MCP
+    \end{itemize}
+\end{enumerate}
+
+% ==========================================
+\section{Selección y Jerarquización}
+% ==========================================
+
+\subsection{1. Asistente IA para la gestión autónoma de productividad (Alta prioridad)}
+
+\textbf{Motivación:} El proyecto JARVIS implementa un sistema completo de gestión de productividad que incluye:
+
+\begin{itemize}
+    \item \textbf{Más de 50 herramientas integradas} para control del sistema, archivos, web, música, calendario, notas, email, y más
+    \item \textbf{Sistema de memoria avanzado} con memoria semántica, episódica y grafos de conocimiento
+    \item \textbf{Monitoreo de tiempo en pantalla} con análisis de productividad por aplicación y categoría
+    \item \textbf{Integración con servicios de comunicación} (Discord, Telegram, WhatsApp, Gmail)
+    \item \textbf{Gestión de calendarios y notas} (Google Calendar, Obsidian)
+\end{itemize}
+
+\textbf{Viabilidad técnica:} El sistema ya está implementado con una arquitectura modular basada en Python 3.11+, con soporte para múltiples backends de LLM (Ollama, Gemini, NVIDIA API).
+
+\subsection{2. Interfaz de control de dispositivos mediante comandos de voz inteligentes (Alta prioridad)}
+
+\textbf{Motivación:} JARVIS implementa un sistema completo de interacción por voz que incluye:
+
+\begin{itemize}
+    \item \textbf{Detección de palabra de activación} mediante OpenWakeWord con modelo ``hey\_jarvis''
+    \item \textbf{Transcripción de voz} con Faster-Whisper optimizado para CUDA
+    \item \textbf{Síntesis de voz natural} mediante servidor XTTS con múltiples voces
+    \item \textbf{Detección de actividad de voz (VAD)} con Silero para segmentación precisa
+    \item \textbf{Control del sistema} (volumen, aplicaciones, comandos de terminal)
+\end{itemize}
+
+\textbf{Afinidad con el hardware:} El sistema soporta aceleración GPU mediante CUDA para procesamiento de audio en tiempo real.
+
+\subsection{3. Sistema multi-agente para tareas complejas (Media prioridad)}
+
+\textbf{Motivación:} JARVIS implementa una arquitectura de agentes especializados:
+
+\begin{itemize}
+    \item \textbf{CodeReviewAgent:} Análisis y revisión de código
+    \item \textbf{ResearchAgent:} Investigación y búsqueda de información
+    \item \textbf{CreativeAgent:} Generación de contenido creativo
+    \item \textbf{PlanningAgent:} Planificación y gestión de proyectos
+    \item \textbf{AgentOrchestrator:} Coordinación y enrutamiento inteligente de solicitudes
+\end{itemize}
+
+\textbf{Formación relacionada:} Este enfoque se relaciona con el análisis de datos y la inteligencia artificial aplicada a la automatización de procesos.
+
+% ==========================================
+\section{Revisión de Información y Antecedentes}
+% ==========================================
+
+\subsection{Autores y Desarrolladores de Referencia}
+
+Se identifica que existe una amplia base de autores y desarrolladores en el campo de la Inteligencia Artificial:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Organización} & \textbf{Tecnología} & \textbf{Aplicación en JARVIS} \\
+\midrule
+OpenAI & GPT, Whisper & Transcripción de voz \\
+Google & Gemini, Transformers & Backend LLM alternativo \\
+Meta & LLaMA, Sentence-BERT & Embeddings semánticos \\
+NVIDIA & CUDA, APIs de inferencia & Aceleración de modelos \\
+Anthropic & Claude & Modelos de razonamiento \\
+Hugging Face & Transformers, Datasets & Modelos preentrenados \\
+\bottomrule
+\end{tabular}
+\caption{Tecnologías y su aplicación en JARVIS}
+\end{table}
+
+\subsection{Documentación Técnica Consultada}
+
+La investigación se apoya en:
+
+\begin{enumerate}
+    \item \textbf{Arquitecturas de Transformadores:}
+    \begin{itemize}
+        \item Faster-Whisper para transcripción de audio
+        \item Sentence-Transformers (all-MiniLM-L6-v2) para embeddings semánticos
+        \item Modelos de lenguaje local via Ollama (qwen3, llama3)
+    \end{itemize}
+    
+    \item \textbf{Interacción Humano-Computadora (HCI) mediante voz:}
+    \begin{itemize}
+        \item OpenWakeWord para detección de palabra de activación
+        \item Silero-VAD para detección de actividad de voz
+        \item XTTS para síntesis de voz natural
+    \end{itemize}
+    
+    \item \textbf{Frameworks de código abierto:}
+    \begin{itemize}
+        \item Model Context Protocol (MCP) para extensibilidad
+        \item LanceDB para almacenamiento de vectores
+        \item FastAPI/WebSockets para comunicación en tiempo real
+        \item Textual para interfaces de terminal enriquecidas
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Protocolos y Estándares}
+
+\begin{itemize}
+    \item \textbf{MCP (Model Context Protocol):} Protocolo estándar para conexión con servidores externos
+    \begin{itemize}
+        \item Servidor de sistema de archivos
+        \item Servidor de GitHub
+        \item Servidor de memoria
+        \item Servidor SQLite
+        \item Servidor Playwright (automatización web)
+        \item Servidor Context7 y Exa (búsqueda semántica)
+    \end{itemize}
+    
+    \item \textbf{APIs de comunicación:}
+    \begin{itemize}
+        \item Telegram Bot API
+        \item Discord API
+        \item WhatsApp Bailey (no oficial)
+        \item Gmail API
+    \end{itemize}
+\end{itemize}
+
+% ==========================================
+\section{Propósito de la Investigación}
+% ==========================================
+
+\subsection{Respuesta y Justificación}
+
+El desarrollo del asistente JARVIS tiene como propósito principal \textbf{optimizar la gestión del tiempo y la productividad del usuario} mediante un sistema que:
+
+\begin{enumerate}
+    \item \textbf{No solo recibe órdenes, sino que aprende de los hábitos:}
+    \begin{itemize}
+        \item Sistema de aprendizaje automático (SelfImprovement) que registra comandos, respuestas y retroalimentación
+        \item Análisis de patrones de uso mediante PatternAnalyzer
+        \item Detección de anomalías con AnomalyDetector
+        \item Motor de sugerencias inteligentes (SmartSuggestionEngine)
+    \end{itemize}
+    
+    \item \textbf{Reduce la carga cognitiva:}
+    \begin{itemize}
+        \item Procesamiento de lenguaje natural para comandos intuitivos
+        \item Automatización de tareas repetitivas mediante workflows
+        \item Sistema de triggers temporales para recordatorios y acciones programadas
+        \item Respuestas proactivas basadas en contexto
+    \end{itemize}
+    
+    \item \textbf{Centraliza la información en una sola interfaz inteligente:}
+    \begin{itemize}
+        \item Más de 50 herramientas integradas en un único punto de acceso
+        \item Memoria unificada (semántica, episódica, procedimental)
+        \item Interfaces múltiples: voz, TUI, WebSocket, Telegram
+        \item Sincronización con servicios externos (calendario, notas, email, repositorios)
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Objetivos Específicos}
+
+\begin{enumerate}
+    \item Proporcionar una interfaz de voz natural y responsiva con latencia mínima
+    \item Implementar un sistema de memoria persistente que permita continuidad entre sesiones
+    \item Ofrecer integración transparente con servicios de productividad existentes
+    \item Garantizar la privacidad mediante procesamiento local de datos sensibles
+    \item Permitir extensibilidad mediante el protocolo MCP para nuevas funcionalidades
+\end{enumerate}
+
+% ==========================================
+\section{Delimitación del Tema}
+% ==========================================
+
+\subsection{Alcance del Proyecto}
+
+Para evitar un alcance excesivamente amplio que comprometa los recursos y el tiempo disponible, el tema final se define de la siguiente manera:
+
+\begin{center}
+\fbox{
+\parbox{0.9\textwidth}{
+\centering
+\textbf{\large Tema Seleccionado:}\\[0.5cm]
+\textit{``Desarrollo de un asistente personal basado en Inteligencia Artificial con capacidades de procesamiento de voz local, memoria semántica persistente y sistema multi-agente para la automatización de tareas de productividad personal''}
+}
+}
+\end{center}
+
+\subsection{Características Delimitadas del Sistema JARVIS}
+
+\subsubsection{Componentes Principales}
+
+\begin{enumerate}
+    \item \textbf{Núcleo de Procesamiento (core/)}
+    \begin{itemize}
+        \item \texttt{assistant.py}: Orquestador principal del asistente
+        \item \texttt{voice/}: Módulos de STT, TTS, VAD y detección de wake word
+        \item \texttt{memory/}: Memoria vectorial, semántica y episódica
+        \item \texttt{llm/}: Clientes para Ollama, Gemini, NVIDIA
+        \item \texttt{learning/}: Sistema de auto-mejora y análisis de patrones
+    \end{itemize}
+    
+    \item \textbf{Sistema de Herramientas (tools/)}
+    \begin{itemize}
+        \item \texttt{system/}: Control del sistema
+        \item \texttt{web/}: Búsqueda web, fetch de URLs
+        \item \texttt{integrations/}: Spotify, Discord, Telegram, GitHub, Docker
+        \item \texttt{memory/}: Almacenamiento y recuperación de memoria
+        \item \texttt{code/}: Ejecución de Python y shell
+    \end{itemize}
+    
+    \item \textbf{Sistema Multi-Agente (agents/)}
+    \begin{itemize}
+        \item \texttt{orchestrator/}: Coordinación y enrutamiento
+        \item \texttt{specialized/}: Agentes de código, investigación, creatividad, planificación
+    \end{itemize}
+    
+    \item \textbf{Integraciones Externas}
+    \begin{itemize}
+        \item MCP Servers: filesystem, GitHub, memory, SQLite, Playwright
+        \item APIs: Telegram Bot, Discord, WhatsApp, Gmail, Calendar
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Tecnologías Específicas}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Categoría} & \textbf{Tecnología} & \textbf{Versión/Modelo} \\
+\midrule
+Lenguaje & Python & 3.11+ \\
+LLM Local & Ollama & qwen3:1.7b, qwen3-vl:8b \\
+LLM Cloud & NVIDIA API & moonshotai/kimi-k2.5 \\
+STT & Faster-Whisper & base.en (CUDA) \\
+TTS & XTTS Server & Puerto 8020 \\
+Wake Word & OpenWakeWord & hey\_jarvis \\
+VAD & Silero-VAD & 0.0.2 \\
+Embeddings & Sentence-Transformers & all-MiniLM-L6-v2 \\
+Vector DB & LanceDB & 0.6.0+ \\
+Framework Web & FastAPI + WebSockets & 0.104.0+ \\
+\bottomrule
+\end{tabular}
+\caption{Stack tecnológico de JARVIS}
+\end{table}
+
+\subsubsection{Limitaciones Definidas}
+
+\begin{itemize}
+    \item \textbf{Plataforma objetivo:} Windows (con compatibilidad parcial Linux/macOS)
+    \item \textbf{Requisitos de hardware:} GPU NVIDIA con CUDA para rendimiento óptimo
+    \item \textbf{Idioma principal:} Inglés (modelo STT base.en)
+    \item \textbf{Modo de operación:} Local-first con opciones de backend en la nube
+    \item \textbf{Usuario objetivo:} Usuario individual 
+\end{itemize}
+
+% ==========================================
+\section{Arquitectura del Sistema}
+% ==========================================
+
+\subsection{Diagrama de Componentes}
+
+\begin{verbatim}
++----------------------------------------------------------+
+|                      JARVIS SYSTEM                        |
++----------------------------------------------------------+
+|                                                          |
+|  +----------------+    +----------------+                |
+|  |   Voice Input  |    |   LLM Backend  |                |
+|  +----------------+    +----------------+                |
+|  | - Wake Word    |    | - Ollama       |                |
+|  | - STT (Whisper)|    | - NVIDIA API   |                |
+|  | - VAD (Silero) |    | - Gemini       |                |
+|  +-------+--------+    +-------+--------+                |
+|          |                     |                         |
+|          v                     v                         |
+|  +-------------------------------------------+           |
+|  |           VoiceAssistant (Core)           |           |
+|  +-------------------------------------------+           |
+|  | - State Management                        |           |
+|  | - Tool Orchestration                      |           |
+|  | - Memory Integration                      |           |
+|  | - Response Generation                     |           |
+|  +--------------------+----------------------+           |
+|                       |                                  |
+|          +------------+------------+                     |
+|          |            |            |                     |
+|          v            v            v                     |
+|  +----------+  +------------+  +------------+            |
+|  |  Tools   |  |   Memory   |  |   Agents   |            |
+|  +----------+  +------------+  +------------+            |
+|  | 50+ tools|  | - Semantic |  | - Code     |            |
+|  | - System |  | - Episodic |  | - Research |            |
+|  | - Web    |  | - Vector   |  | - Creative |            |
+|  | - Integr.|  | - Knowledge|  | - Planning |            |
+|  +----------+  +------------+  +------------+            |
+|                                                          |
++----------------------------------------------------------+
+\end{verbatim}
+
+\subsection{Flujo de Procesamiento de Voz}
+
+\begin{enumerate}
+    \item \textbf{Detección de Wake Word:} OpenWakeWord detecta ``Hey JARVIS''
+    \item \textbf{Captura de Audio:} Stream de audio a 16kHz, chunks de 512 samples
+    \item \textbf{Detección de Silencio:} VAD determina fin de utterance
+    \item \textbf{Transcripción:} Faster-Whisper convierte audio a texto
+    \item \textbf{Procesamiento:} LLM genera respuesta con acceso a herramientas
+    \item \textbf{Ejecución:} Herramientas se ejecutan según sea necesario
+    \item \textbf{Síntesis:} XTTS genera audio de respuesta
+    \item \textbf{Reproducción:} Audio se reproduce con soporte de interrupción
+\end{enumerate}
+
+% ==========================================
+\section{Conclusiones Preliminares}
+% ==========================================
+
+El proyecto JARVIS representa una implementación comprehensiva de un asistente personal con IA que:
+
+\begin{enumerate}
+    \item \textbf{Aborda múltiples áreas de investigación} en IA aplicada:
+    \begin{itemize}
+        \item Procesamiento de lenguaje natural (NLP/NLU)
+        \item Reconocimiento y síntesis de voz
+        \item Sistemas multi-agente
+        \item Memoria y razonamiento
+    \end{itemize}
+    
+    \item \textbf{Implementa soluciones prácticas} para problemas reales:
+    \begin{itemize}
+        \item Gestión de productividad personal
+        \item Automatización de tareas rutinarias
+        \item Centralización de servicios digitales
+    \end{itemize}
+    
+    \item \textbf{Utiliza tecnologías de vanguardia} manteniendo:
+    \begin{itemize}
+        \item Privacidad mediante procesamiento local
+        \item Extensibilidad mediante protocolos abiertos (MCP)
+        \item Rendimiento mediante aceleración GPU
+    \end{itemize}
+\end{enumerate}
+
+% ==========================================
+\section{Referencias y Recursos}
+% ==========================================
+
+\subsection{Repositorios y Documentación}
+
+\begin{itemize}
+    \item OpenWakeWord: \url{https://github.com/dscripka/openWakeWord}
+    \item Faster-Whisper: \url{https://github.com/SYSTRAN/faster-whisper}
+    \item Ollama: \url{https://ollama.ai/}
+    \item LanceDB: \url{https://lancedb.github.io/lancedb/}
+    \item Model Context Protocol: \url{https://modelcontextprotocol.io/}
+    \item Sentence-Transformers: \url{https://www.sbert.net/}
+\end{itemize}
+
+\end{document}

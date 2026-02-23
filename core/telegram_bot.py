@@ -31,6 +31,15 @@ from tools.integrations.telegram import get_telegram_client
 log = logging.getLogger(__name__)
 
 
+async def _broadcast_to_websockets(message: dict):
+    try:
+        from core.websocket_server import broadcast_to_websockets
+
+        await broadcast_to_websockets(message)
+    except ImportError:
+        log.debug("WebSocket broadcast not available")
+
+
 @dataclass
 class ChatSession:
     """Maintains conversation state for a Telegram chat."""
@@ -324,14 +333,24 @@ class TelegramBotHandler:
         # Add user message to session
         session.add_message("user", text)
 
-        # Send "typing" indicator (optional, would need additional API call)
+        try:
+            await _broadcast_to_websockets(
+                {
+                    "type": "user_message",
+                    "content": text,
+                    "source": "telegram",
+                    "chat_id": str(chat_id),
+                    "username": session.username or session.first_name or "Unknown",
+                }
+            )
+        except Exception as e:
+            log.warning(f"[TELEGRAM] Failed to broadcast user message to WebSocket: {e}")
 
         try:
             # Process through JARVIS server
             # Collect streaming response
             full_response = ""
 
-            # Create a custom broadcast function to capture response
             response_chunks = []
 
             async def capture_broadcast(message: dict) -> None:
@@ -340,6 +359,11 @@ class TelegramBotHandler:
                     response_chunks.append(message.get("content", ""))
                 elif message.get("type") == "message_complete":
                     full_response = message.get("full_response", "")
+
+                try:
+                    await _broadcast_to_websockets(message)
+                except Exception as e:
+                    log.warning(f"[TELEGRAM] Failed to broadcast to WebSocket: {e}")
 
             # Process the message
             await self.jarvis.process_message(text, broadcast_func=capture_broadcast)

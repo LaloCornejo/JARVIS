@@ -30,6 +30,18 @@ from typing import TYPE_CHECKING, Any, Callable
 import httpx
 import websockets
 
+log = logging.getLogger(__name__)
+
+
+async def _broadcast_to_websockets(message: dict):
+    try:
+        from core.websocket_server import broadcast_to_websockets
+
+        await broadcast_to_websockets(message)
+    except ImportError:
+        log.debug("WebSocket broadcast not available")
+
+
 # Import voice receive functionality
 try:
     from discord.ext import voice_recv
@@ -660,6 +672,20 @@ class DiscordBotHandler:
             return
         session.add_message("user", text)
         await self._send_typing(channel_id)
+
+        try:
+            await _broadcast_to_websockets(
+                {
+                    "type": "user_message",
+                    "content": text,
+                    "source": "discord",
+                    "channel_id": channel_id,
+                    "username": session.username or "Unknown",
+                }
+            )
+        except Exception as e:
+            log.warning(f"[DISCORD] Failed to broadcast user message to WebSocket: {e}")
+
         try:
             full_response = ""
             response_chunks = []
@@ -680,6 +706,11 @@ class DiscordBotHandler:
                         )
                     else:
                         log.debug(f"[DISCORD] Received unknown message type: {message_type}")
+
+                    try:
+                        await _broadcast_to_websockets(message)
+                    except Exception as e:
+                        log.warning(f"[DISCORD] Failed to broadcast to WebSocket: {e}")
                 except Exception as e:
                     log.error(f"[DISCORD] Error in capture_broadcast: {e}", exc_info=True)
 

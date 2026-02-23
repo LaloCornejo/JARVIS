@@ -101,7 +101,7 @@ connected_clients: Set[WebSocket] = set()
 
 
 async def broadcast(message: dict):
-    """Broadcast a message to all connected clients"""
+    """Broadcast a message to all connected WebSocket clients"""
     print(f"Broadcasting {message.get('type', 'unknown')} to {len(connected_clients)} clients")
     log.warning(
         f"[WEBSOCKET] Broadcasting {message.get('type', 'unknown')} to {len(connected_clients)} clients"
@@ -112,6 +112,11 @@ async def broadcast(message: dict):
         except Exception as e:
             log.error(f"[WEBSOCKET] Failed to send to client: {e}")
             connected_clients.discard(client)
+
+
+async def broadcast_to_websockets(message: dict):
+    """Alias for broadcast - can be used by external modules to send to WebSocket clients"""
+    await broadcast(message)
 
 
 @app.websocket("/ws")

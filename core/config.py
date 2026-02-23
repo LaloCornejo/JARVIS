@@ -34,49 +34,29 @@ class Config:
         return value
 
     @property
+    def llm_backend(self) -> str:
+        return self.get("llm.backend", "ollama")
+
+    def _get_backend_config(self, key: str, default=None):
+        backend = self.llm_backend
+        return self.get(f"{backend}.{key}", default)
+
+    @property
     def llm_url(self) -> str:
-        backend = self.get("llm.backend", "nvidia")  # Changed default to nvidia
-        # if backend == "nvidia":
-        #     return self.get("nvidia.api_url", "https://integrate.api.nvidia.com/v1")
-        # elif backend == "ollama":
-        return self.get("ollama.api_url", "http://localhost:11434")
-        # else:
-        #     return self.get("llm.api_url", "https://integrate.api.nvidia.com/v1")
+        return self._get_backend_config("api_url", "http://localhost:11434")
 
     @property
     def llm_model(self) -> str:
-        backend = self.get("llm.backend", "nvidia")
-        if backend == "nvidia":
-            return self.get("llm.primary_model", "moonshotai/kimi-k2.5")
-        elif backend == "ollama":
-            return self.get("llm.primary_model", "qwen3:1.7b")
-        else:
-            return self.get("llm.primary_model", "moonshotai/kimi-k2.5")
+        return self._get_backend_config("primary_model", "qwen3:1.7b")
 
     @property
     def llm_vision_model(self) -> str:
-        backend = self.get("llm.backend", "nvidia")
-        # if backend == "nvidia":
-        #     return self.get("llm.vision_model", "moonshotai/kimi-k2.5")
-        # elif backend == "ollama":
-        return self.get(
-            "llm.vision_model", "huihui_ai/qwen3-vl-abliterated:8b-instruct "
+        return self._get_backend_config(
+            "vision_model", "huihui_ai/qwen3-vl-abliterated:8b-instruct"
         )
-        # else:
-        #     return self.get("llm.vision_model", "moonshotai/kimi-k2.5")
 
     def llm_fast_model(self) -> str:
-        backend = self.get("llm.backend", "nvidia")  # Changed default to nvidia
-        if backend == "nvidia":
-            return self.get(
-                "llm.fast_model", "moonshotai/kimi-k2.5"
-            )  # Changed default to correct model name
-        elif backend == "ollama":
-            return self.get("llm.fast_model", "qwen3:1.7b")
-        else:
-            return self.get(
-                "llm.fast_model", "moonshotai/kimi-k2.5"
-            )  # Changed default to correct model name
+        return self._get_backend_config("fast_model", "qwen3:1.7b")
 
     @property
     def tts_base_url(self) -> str:

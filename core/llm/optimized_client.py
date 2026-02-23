@@ -354,6 +354,7 @@ class OptimizedLLMClient:
 
                         try:
                             data = json.loads(line)
+
                             if "error" in data:
                                 yield {"type": "error", "error": data["error"]}
                                 return
@@ -361,14 +362,17 @@ class OptimizedLLMClient:
                             if "message" in data:
                                 message = data["message"]
 
-                                # Handle content streaming
-                                if "content" in message and message["content"]:
-                                    content = message["content"]
+                                content = message.get("content", "")
+                                thinking = message.get("thinking", "")
+
+                                if thinking:
+                                    content = thinking + content
+
+                                if content:
                                     buffer += content
-                                    full_response += content  # Accumulate immediately
+                                    full_response += content
                                     chunk_count += 1
 
-                                    # Intelligent chunking based on content analysis
                                     should_yield = self._should_yield_chunk(
                                         buffer, chunk_count, content
                                     )
@@ -533,10 +537,9 @@ class OptimizedLLMClient:
                 "temperature": 0.7,
                 "top_p": 0.9,
                 "top_k": 40,
-                "num_predict": -1,  # Unlimited
-                "stop": ["\n", "\n\n", ""],
+                "num_predict": 4096,
                 "num_ctx": context_window or self.num_ctx,
-                "num_thread": -1,  # Use all available threads
+                "num_thread": -1,
                 "repeat_penalty": 1.1,
                 "repeat_last_n": 64,
             },

@@ -86,25 +86,44 @@ class JarvisWithLive2D {
   }
 
   handleMessage(data) {
-    const { type, content } = data;
+    const { type, content, source, username, chat_id, channel_id } = data;
 
     switch (type) {
       case 'user_message':
         this.currentResponse = '';
+        if (source) {
+          const sourceLabel = this.getSourceLabel(source, username, chat_id, channel_id);
+          this.responseBox.innerHTML = `<span class="source-label">${sourceLabel}</span>`;
+        }
         break;
       case 'streaming_chunk':
         this.currentResponse += content;
-        this.showResponse(this.currentResponse);
+        this.showResponse(this.currentResponse, source);
         break;
       case 'assistant_message':
         this.currentResponse = content;
-        this.showResponse(content);
+        this.showResponse(content, source);
         break;
       case 'message_complete':
-        // Keep the final response
         break;
       default:
         this.responseBox.textContent = `Received: ${type}`;
+    }
+  }
+
+  getSourceLabel(source, username, chatId, channelId) {
+    const user = username || 'Unknown';
+    switch (source) {
+      case 'telegram':
+        return `[Telegram: ${user}] `;
+      case 'discord':
+        return `[Discord: ${user}] `;
+      case 'whatsapp':
+        return `[WhatsApp: ${user}] `;
+      case 'tui':
+        return `[TUI] `;
+      default:
+        return `[${source || 'Unknown'}: ${user}] `;
     }
   }
 
@@ -178,14 +197,17 @@ class JarvisWithLive2D {
     }
   }
 
-  showResponse(content) {
-    // Truncate if needed
+  showResponse(content, source = null) {
     if (content.length > 2000) {
       content = content.substring(0, 2000) + '...';
     }
-    // Render Markdown
     const html = marked.parse ? marked.parse(content) : marked(content);
-    this.responseBox.innerHTML = html;
+    
+    if (source && source !== 'tui') {
+      this.responseBox.innerHTML = `<span class="source-${source}">${html}</span>`;
+    } else {
+      this.responseBox.innerHTML = html;
+    }
     // Apply bionic reading
     this.applyBionic(this.responseBox);
     // Dynamic font size
