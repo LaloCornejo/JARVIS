@@ -8,10 +8,19 @@ class JarvisWithLive2D {
     this.responseBox = document.getElementById("response-box");
     this.responseTimeout = null;
     this.currentResponse = "";
-    this.responseBox.classList.add("visible");
+    if (this.responseBox) {
+      this.responseBox.classList.add("visible");
+    }
     this.initializeLive2D();
-    // Delay connect to allow server to start
     setTimeout(() => this.connect(), 5000);
+  }
+
+  // Safe helper to access responseBox
+  getResponseBox() {
+    if (!this.responseBox) {
+      this.responseBox = document.getElementById("response-box");
+    }
+    return this.responseBox;
   }
 
   connect() {
@@ -19,27 +28,38 @@ class JarvisWithLive2D {
 
     this.ws.onopen = () => {
       console.log("Connected to JARVIS server with Live2D");
-      this.responseBox.textContent = "Connected to JARVIS";
-      this.responseBox.classList.add("visible");
+      const box = this.getResponseBox();
+      if (box) {
+        box.textContent = "Connected to JARVIS";
+        box.classList.add("visible");
+      }
     };
 
     this.ws.onclose = () => {
       console.log("Disconnected from JARVIS server");
-      this.responseBox.textContent = "Disconnected from JARVIS";
-      // Attempt to reconnect after 5 seconds
+      const box = this.getResponseBox();
+      if (box) {
+        box.textContent = "Disconnected from JARVIS";
+      }
       setTimeout(() => this.connect(), 5000);
     };
 
     this.ws.onerror = (error) => {
       console.error("WebSocket error:", error);
-      this.responseBox.textContent = "Connection failed";
+      const box = this.getResponseBox();
+      if (box) {
+        box.textContent = "Connection failed";
+      }
     };
 
     this.ws.onmessage = (event) => {
       try {
         this.handleMessage(JSON.parse(event.data));
       } catch (e) {
-        this.responseBox.textContent = `Parse error: ${e.message}`;
+        const box = this.getResponseBox();
+        if (box) {
+          box.textContent = `Parse error: ${e.message}`;
+        }
       }
     };
   }
@@ -48,7 +68,6 @@ class JarvisWithLive2D {
     console.log("[DEBUG] Starting Live2D initialization...");
 
     try {
-      // Import Live2D manager
       console.log("[DEBUG] Importing Live2D manager...");
       const { Live2DManager } = await import("./live2d-manager.js");
       console.log("[DEBUG] Live2D manager imported successfully");
@@ -65,21 +84,14 @@ class JarvisWithLive2D {
       console.log("[DEBUG] Live2D initialized successfully");
     } catch (error) {
       console.error("[DEBUG] Failed to initialize Live2D:", error);
-      console.error("[DEBUG] Error details:", {
-        message: error.message,
-        stack: error.stack,
-        name: error.name,
-      });
     }
   }
 
-  // Handle screen dimensions from main process
   handleScreenDimensions(dimensions) {
     console.log("Screen dimensions:", dimensions);
     this.screenWidth = dimensions.width;
     this.screenHeight = dimensions.height;
 
-    // Update Live2D canvas size if manager exists
     if (this.live2dManager) {
       this.live2dManager.onResize();
     }
@@ -93,21 +105,33 @@ class JarvisWithLive2D {
         this.currentResponse = '';
         if (source) {
           const sourceLabel = this.getSourceLabel(source, username, chat_id, channel_id);
-          this.responseBox.innerHTML = `<span class="source-label">${sourceLabel}</span>`;
+          const box = this.getResponseBox();
+          if (box) {
+            box.innerHTML = `<span class="source-label">${sourceLabel}</span>`;
+          }
         }
+        this.triggerLive2DReaction("talk");
         break;
       case 'streaming_chunk':
         this.currentResponse += content;
         this.showResponse(this.currentResponse, source);
+        if (Math.random() < 0.15) {
+          this.triggerLive2DReaction("talk");
+        }
         break;
       case 'assistant_message':
         this.currentResponse = content;
         this.showResponse(content, source);
+        this.handleAssistantMessage(content);
         break;
       case 'message_complete':
+        this.handleMessageComplete();
         break;
       default:
-        this.responseBox.textContent = `Received: ${type}`;
+        const box2 = this.getResponseBox();
+        if (box2) {
+          box2.textContent = `Received: ${type}`;
+        }
     }
   }
 
@@ -129,38 +153,19 @@ class JarvisWithLive2D {
 
   handleAssistantMessage(content) {
     this.currentResponse = content;
-    // Display the response
     this.showResponse(content);
 
-    // Analyze message content for appropriate reaction
     const lowerContent = content.toLowerCase();
 
-    if (
-      lowerContent.includes("hello") ||
-      lowerContent.includes("hi") ||
-      lowerContent.includes("greetings")
-    ) {
+    if (lowerContent.includes("hello") || lowerContent.includes("hi") || lowerContent.includes("greetings")) {
       this.triggerLive2DReaction("happy");
-    } else if (
-      lowerContent.includes("error") ||
-      lowerContent.includes("failed") ||
-      lowerContent.includes("sorry")
-    ) {
+    } else if (lowerContent.includes("error") || lowerContent.includes("failed") || lowerContent.includes("sorry")) {
       this.triggerLive2DReaction("sad");
-    } else if (
-      lowerContent.includes("yes") ||
-      lowerContent.includes("correct") ||
-      lowerContent.includes("good")
-    ) {
+    } else if (lowerContent.includes("yes") || lowerContent.includes("correct") || lowerContent.includes("good")) {
       this.triggerLive2DReaction("happy");
-    } else if (
-      lowerContent.includes("no") ||
-      lowerContent.includes("wrong") ||
-      lowerContent.includes("bad")
-    ) {
+    } else if (lowerContent.includes("no") || lowerContent.includes("wrong") || lowerContent.includes("bad")) {
       this.triggerLive2DReaction("angry");
     } else {
-      // Default reaction for regular messages
       this.triggerLive2DReaction("talk");
     }
   }
@@ -169,15 +174,12 @@ class JarvisWithLive2D {
     this.currentResponse += content;
     this.showResponse(this.currentResponse);
 
-    // Subtle reaction during streaming
     if (Math.random() < 0.1) {
-      // 10% chance to react
       this.triggerLive2DReaction("idle");
     }
   }
 
   handleMessageComplete() {
-    // Reset to idle state
     this.triggerLive2DReaction("idle");
   }
 
@@ -198,37 +200,36 @@ class JarvisWithLive2D {
   }
 
   showResponse(content, source = null) {
+    const box = this.getResponseBox();
+    if (!box) return;
+
     if (content.length > 2000) {
       content = content.substring(0, 2000) + '...';
     }
     const html = marked.parse ? marked.parse(content) : marked(content);
     
     if (source && source !== 'tui') {
-      this.responseBox.innerHTML = `<span class="source-${source}">${html}</span>`;
+      box.innerHTML = `<span class="source-${source}">${html}</span>`;
     } else {
-      this.responseBox.innerHTML = html;
+      box.innerHTML = html;
     }
-    // Apply bionic reading
-    this.applyBionic(this.responseBox);
-    // Dynamic font size
-    this.responseBox.style.fontSize = content.length > 500 ? '13px' : '16px';
-    // Adjust height for long responses
+    this.applyBionic(box);
+    box.style.fontSize = content.length > 500 ? '13px' : '16px';
     if (content.length > 1000) {
-      this.responseBox.style.maxHeight = '400px';
+      box.style.maxHeight = '400px';
     } else {
-      this.responseBox.style.maxHeight = '200px';
+      box.style.maxHeight = '200px';
     }
-    this.responseBox.classList.add('visible');
+    box.classList.add('visible');
     if (this.responseTimeout) {
       clearTimeout(this.responseTimeout);
     }
     this.responseTimeout = setTimeout(() => {
-      this.responseBox.classList.remove('visible');
-    }, 60000); // Hide after 1 minute
+      box.classList.remove('visible');
+    }, 60000);
   }
 
   handleLive2DCommand(command) {
-    // Handle specific Live2D commands from server
     if (!this.live2dManager) return;
 
     try {
@@ -251,11 +252,7 @@ class JarvisWithLive2D {
           }
           break;
         case "set_parameter":
-          if (
-            parameter &&
-            parameter.id !== undefined &&
-            parameter.value !== undefined
-          ) {
+          if (parameter && parameter.id !== undefined && parameter.value !== undefined) {
             this.live2dManager.setParameter(parameter.id, parameter.value);
           }
           break;
@@ -266,73 +263,66 @@ class JarvisWithLive2D {
   }
 
   triggerLive2DReaction(reactionType) {
-    if (!this.live2dManager) return;
+    if (!this.live2dManager || !this.live2dManager.live2dModel) return;
 
     switch (reactionType) {
       case "talk":
-        // Try to play a talking motion
-        this.live2dManager.playMotion("talk");
+        this.live2dManager.playMotion("talk", 1);
         break;
       case "idle":
-        // Return to idle state
         this.live2dManager.startIdleAnimation();
         break;
       case "happy":
-        // Try different expressions for happy
-        this.live2dManager.setExpression("happy") ||
-          this.live2dManager.setExpression("exp_01") ||
-          this.live2dManager.setExpression("开心") ||
-          this.live2dManager.setExpression("爱心眼");
+        this.tryExpressions(["happy", "exp_01", "开心", "爱心眼", "脸红"]);
         break;
       case "angry":
-        // Try different expressions for angry
-        this.live2dManager.setExpression("angry") ||
-          this.live2dManager.setExpression("生气") ||
-          this.live2dManager.setExpression("脸黑");
+        this.tryExpressions(["angry", "生气", "脸黑", "血"]);
         break;
       case "sad":
-        // Try different expressions for sad
-        this.live2dManager.setExpression("sad") ||
-          this.live2dManager.setExpression("泪") ||
-          this.live2dManager.setExpression("白眼");
+        this.tryExpressions(["sad", "泪", "白眼"]);
         break;
       case "surprised":
-        // Try different expressions for surprised
-        this.live2dManager.setExpression("surprised") ||
-          this.live2dManager.setExpression("星星眼");
+        this.tryExpressions(["surprised", "星星眼"]);
         break;
       case "blink":
-        // Trigger eye blink
-        this.live2dManager.playMotion("blink");
+        this.live2dManager.playMotion("blink", 2);
         break;
     }
   }
 
-  // Method to send messages programmatically
+  tryExpressions(expressionNames) {
+    for (const name of expressionNames) {
+      try {
+        const expressionManager = this.live2dManager.live2dModel.internalModel?.motionManager?.expressionManager;
+        const expressions = expressionManager?.expressions;
+        
+        if (expressions && expressions[name]) {
+          expressionManager.setExpression(name);
+          console.log(`[Live2D] Applied expression: ${name}`);
+          return true;
+        }
+      } catch (e) {}
+    }
+    console.log(`[Live2D] No matching expression found for: ${expressionNames.join(", ")}`);
+    return false;
+  }
+
   sendMessage(message) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(
-        JSON.stringify({
-          type: "user_message",
-          content: message,
-        }),
-      );
+      this.ws.send(JSON.stringify({ type: "user_message", content: message }));
       return true;
     }
     return false;
   }
 
-  // Get available Live2D models
   getAvailableModels() {
     return this.live2dManager ? this.live2dManager.getAvailableModels() : [];
   }
 
-  // Get current model
   getCurrentModel() {
     return this.live2dManager ? this.live2dManager.getCurrentModel() : null;
   }
 
-  // Switch to different model
   async switchModel(modelName) {
     if (this.live2dManager) {
       try {
@@ -347,95 +337,116 @@ class JarvisWithLive2D {
   }
 }
 
-// Initialize JARVIS with Live2D when the page loads
 document.addEventListener("DOMContentLoaded", () => {
   const jarvis = new JarvisWithLive2D();
 
-  // Listen for screen dimensions from main process
+  // Enable passthrough after a short delay to ensure window is ready
+  setTimeout(() => {
+    ipcRenderer.send("set-ignore-mouse-events", true);
+  }, 1000);
+
   ipcRenderer.on("screen-dimensions", (event, dimensions) => {
     jarvis.handleScreenDimensions(dimensions);
   });
 
-  // Handle window resize
+  // Global mouse tracking for model following
+  let followEnabled = true;
+  let targetX = 0, targetY = 0;
+  
+  ipcRenderer.on("mouse-position", (event, pos) => {
+    if (!jarvis.live2dManager || !jarvis.live2dManager.live2dModel) return;
+    
+    const model = jarvis.live2dManager.live2dModel;
+    const app = jarvis.live2dManager.app;
+    if (!app) return;
+    
+    // Calculate mouse position relative to window
+    const relX = pos.x - pos.windowX;
+    const relY = pos.y - pos.windowY;
+    
+    // Clamp to window bounds (0-1 range)
+    const normX = Math.max(0, Math.min(1, relX / pos.windowWidth));
+    const normY = Math.max(0, Math.min(1, relY / pos.windowHeight));
+    
+    console.log(`[Mouse] rel: ${relX.toFixed(0)},${relY.toFixed(0)} norm: ${normX.toFixed(2)},${normY.toFixed(2)}`);
+    
+    targetX = normX;
+    targetY = normY;
+    
+    // Try different methods to set look-at
+    try {
+      const internal = model.internalModel;
+      if (internal) {
+        // Method 1: Check for lookAt in motionManager
+        const mm = internal.motionManager;
+        if (mm) {
+          if (mm.lookAt) {
+            mm.lookAt.angle = (normX - 0.5) * 30;
+            mm.lookAt.angleY = (normY - 0.5) * 15;
+          }
+          // Method 2: Try setting parameter directly
+          if (mm.coreModel) {
+            const ParamAngleX = internal.model.settings?.find(p => p.id === 'ParamAngleX');
+            const ParamAngleY = internal.model.settings?.find(p => p.id === 'ParamAngleY');
+            if (ParamAngleX) {
+              mm.coreModel.setParameterValueById('ParamAngleX', (normX - 0.5) * 30);
+            }
+            if (ParamAngleY) {
+              mm.coreModel.setParameterValueById('ParamAngleY', (normY - 0.5) * 15);
+            }
+          }
+        }
+        
+        // Method 3: Try View translation
+        if (internal.model?.transform) {
+          const view = internal.model.transform;
+          const offsetX = (normX - 0.5) * 0.1;
+          const offsetY = (normY - 0.5) * 0.1;
+          view.position.x = offsetX;
+          view.position.y = offsetY;
+        }
+      }
+    } catch (e) {
+      // Silently fail - tracking is optional
+    }
+  });
+
+  // Listen for global toggle events from main process
+  ipcRenderer.on("toggle-follow", () => {
+    followEnabled = !followEnabled;
+    console.log("Follow mode:", followEnabled);
+    if (toggleBtn) {
+      toggleBtn.textContent = followEnabled ? "Follow: ON" : "Passthrough: OFF";
+      toggleBtn.style.background = followEnabled ? "rgba(0,100,200,0.5)" : "rgba(0,0,0,0.5)";
+    }
+  });
+
+  ipcRenderer.on("toggle-passthrough", () => {
+    updatePassthrough(!passthroughEnabled);
+  });
+
   window.addEventListener("resize", () => {
     if (jarvis.live2dManager) {
       jarvis.live2dManager.onResize();
     }
   });
 
-  // Make jarvis instance globally available for debugging
   window.jarvis = jarvis;
 
-  // Add debug functions for testing
   window.testLive2D = {
-    switchModel: (modelName) => {
-      console.log(`Switching to model: ${modelName}`);
-      return jarvis.switchModel(modelName);
-    },
+    switchModel: (modelName) => jarvis.switchModel(modelName),
     getAvailableModels: () => jarvis.getAvailableModels(),
     getCurrentModel: () => jarvis.getCurrentModel(),
     playMotion: (motionName) => {
-      console.log(`Playing motion: ${motionName}`);
       if (jarvis.live2dManager) {
         jarvis.live2dManager.playMotion(motionName);
       }
     },
     setExpression: (expressionName) => {
-      console.log(`Setting expression: ${expressionName}`);
       if (jarvis.live2dManager) {
         jarvis.live2dManager.setExpression(expressionName);
       }
     },
-    triggerReaction: (reactionType) => {
-      console.log(`Triggering reaction: ${reactionType}`);
-      jarvis.triggerLive2DReaction(reactionType);
-    },
-    // Add additional debug functions
-    testFilePaths: () => {
-      console.log("[DEBUG] Testing file paths...");
-      const testPaths = [
-        "../2dModels/jean/简.model3.json",
-        "../2dModels/shiro/Z.model3.json",
-        "../2dModels/shizuku/runtime/shizuku.model3.json",
-        "../2dModels/mao_pro/runtime/mao_pro.model3.json",
-        "../2dModels/Sparkle/Sparkle.model3.json",
-      ];
-
-      testPaths.forEach(async (path) => {
-        try {
-          const response = await fetch(path);
-          console.log(
-            `[DEBUG] Path ${path}: Status ${response.status} (${response.ok ? "OK" : "FAILED"})`,
-          );
-        } catch (error) {
-          console.log(`[DEBUG] Path ${path}: Error - ${error.message}`);
-        }
-      });
-    },
-    debugManager: () => {
-      console.log("[DEBUG] Live2D Manager Debug Info:");
-      if (jarvis.live2dManager) {
-        console.log("Manager exists:", jarvis.live2dManager);
-        console.log("Is initialized:", jarvis.live2dManager.isInitialized);
-        console.log("Current model:", jarvis.live2dManager.currentModel);
-        console.log("Models path:", jarvis.live2dManager.modelsPath);
-        console.log("Available models:", jarvis.live2dManager.availableModels);
-        console.log("PIXI app exists:", !!jarvis.live2dManager.app);
-        console.log("Live2D model exists:", !!jarvis.live2dManager.live2dModel);
-      } else {
-        console.log("Live2D manager not found");
-      }
-    },
+    triggerReaction: (reactionType) => jarvis.triggerLive2DReaction(reactionType),
   };
-
-  console.log("Debug functions available via window.testLive2D");
-  console.log("Available models:", window.testLive2D.getAvailableModels());
-  console.log("Additional debug commands:");
-  console.log(
-    "- window.testLive2D.testFilePaths() - Test if model files are accessible",
-  );
-  console.log(
-    "- window.testLive2D.debugManager() - Show manager internal state",
-  );
 });
-

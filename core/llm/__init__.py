@@ -15,7 +15,6 @@ def get_vision_client() -> OllamaClient:
         import asyncio
 
         try:
-            # Try to preload in background
             asyncio.create_task(_vision_client.preload_model())
         except Exception:
             pass  # Ignore if preloading fails
@@ -25,8 +24,7 @@ def get_vision_client() -> OllamaClient:
 def get_fast_client() -> OllamaClient:
     global _fast_client
     if _fast_client is None:
-        _fast_client = OllamaClient(model="qwen3:1.7b")
-        # Preload the model asynchronously
+        _fast_client = OllamaClient(model="qwen3.5:2b")
         import asyncio
 
         try:

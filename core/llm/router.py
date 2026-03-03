@@ -152,7 +152,7 @@ class ModelRouter:
         ollama_client: OllamaClient,
         copilot_client: CopilotClient | None = None,
         gemini_client: GeminiClient | None = None,
-        ollama_model: str = "qwen3:1.7b",
+        ollama_model: str = "qwen3.5:2b",
         copilot_model: str = "claude-sonnet-4.5",
         gemini_model: str = "gemini-2.5-flash",
         primary_backend: Literal["ollama", "gemini"] = "ollama",

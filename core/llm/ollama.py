@@ -10,9 +10,8 @@ import httpx
 log = logging.getLogger("jarvis.ollama")
 
 MODEL_CONTEXT_WINDOWS = {
-    "qwen3:1.7b": 32768,
+    "qwen3.5:2b": 32768,
     "huihui_ai/qwen3-vl-abliterated:8b-instruct": 32768,
-    "gpt-oss": 32768,
 }
 DEFAULT_NUM_CTX = 16384
 
@@ -21,7 +20,7 @@ class OllamaClient:
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "qwen3:1.7b",
+        model: str = "qwen3.5:2b",
         timeout: float = 300.0,
         num_ctx: int | None = None,
     ):
@@ -79,7 +78,9 @@ class OllamaClient:
         num_predict: int | None = None,
     ) -> AsyncIterator[str]:
         client = await self._get_client()
-        log.info(f"Sending {'vision' if images else 'text'} generation request to Ollama")
+        log.info(
+            f"Sending {'vision' if images else 'text'} generation request to Ollama"
+        )
         actual_prompt = prompt
         if self._should_disable_thinking():
             actual_prompt = f"/no_think\n{prompt}"

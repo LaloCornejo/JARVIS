@@ -76,7 +76,7 @@ class VoiceAssistant:
         log.debug("Initializing OllamaClient: %s", self.config.llm_url)
         self.ollama = OllamaClient(
             base_url=self.config.llm_url,
-            model=self.config.get("llm.primary_model", "qwen3:1.7b"),
+            model=self.config.get("llm.primary_model", "qwen3.5:2b"),
         )
         self._preload_ollama = self.config.get("ollama.preload", False)
 
@@ -87,7 +87,7 @@ class VoiceAssistant:
         primary_backend = self.config.get("llm.backend", "ollama")
         self.router = ModelRouter(
             ollama_client=self.ollama,
-            ollama_model=self.config.get("llm.primary_model", "qwen3:1.7b"),
+            ollama_model=self.config.get("llm.primary_model", "qwen3.5:2b"),
             primary_backend=primary_backend,
         )
         self.llm = self.ollama
@@ -598,7 +598,9 @@ class VoiceAssistant:
                 # Add retry instruction if needed
                 attempt_prompt = system_prompt
                 if attempt > 0:
-                    attempt_prompt += "\n\nIMPORTANT: All tools have been executed. DO NOT make more tool calls. "
+                    attempt_prompt += (
+                        "\n\nIMPORTANT: All tools have been executed. DO NOT make more tool calls. "
+                    )
                     attempt_prompt += f"Provide a natural response to the user. Attempt {attempt + 1}/{max_attempts}."
 
                 async for chunk in client.chat(

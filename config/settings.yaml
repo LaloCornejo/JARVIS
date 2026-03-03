@@ -3,20 +3,17 @@ jarvis:
   wake_word: "hey jarvis"
   timezone: "America/Mexico_City"
 
-# LLM Configuration
-# Change 'backend' to switch providers: ollama, nvidia, gemini
 llm:
-  backend: nvidia
-  temperature: 0.7
+  backend: ollama
+  temperature: 0.6
   stream: true
 
-# Backend-specific configurations
 ollama:
   api_url: http://localhost:11434
-  primary_model: qwen3:1.7b
-  fast_model: qwen3:1.7b
+  primary_model: qwen3.5:2b
+  fast_model: qwen3.5:2b
   vision_model: huihui_ai/qwen3-vl-abliterated:8b-instruct
-  fallback_model: qwen3:1.7b
+  fallback_model: qwen3.5:2b
   preload: true
 
 nvidia:
@@ -80,6 +77,8 @@ tools:
     - github
     - docker
     - mcp_github_mcp
+    # Smart Home
+    - homeassistant
     # Media & Entertainment
     - music
     - spotify

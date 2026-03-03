@@ -47,7 +47,7 @@ class Config:
 
     @property
     def llm_model(self) -> str:
-        return self._get_backend_config("primary_model", "qwen3:1.7b")
+        return self._get_backend_config("primary_model", "qwen3.5:2b")
 
     @property
     def llm_vision_model(self) -> str:
@@ -56,7 +56,7 @@ class Config:
         )
 
     def llm_fast_model(self) -> str:
-        return self._get_backend_config("fast_model", "qwen3:1.7b")
+        return self._get_backend_config("fast_model", "qwen3.5:2b")
 
     @property
     def tts_base_url(self) -> str:

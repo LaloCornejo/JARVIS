@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+from tools.integrations.home_assistant import (
+    HomeAssistantCallServiceTool,
+    HomeAssistantGetConfigTool,
+    HomeAssistantGetDevicesTool,
+    HomeAssistantGetServicesTool,
+    HomeAssistantGetStateTool,
+    HomeAssistantListEntitiesTool,
+    HomeAssistantToggleTool,
+    HomeAssistantTurnOffTool,
+    HomeAssistantTurnOnTool,
+)
 from tools.integrations.clipboard import (
     ClipboardClearHistoryTool,
     ClipboardCopyTool,
@@ -119,6 +130,17 @@ from tools.integrations.youtube import (
 )
 
 __all__ = [
+    # Home Assistant
+    "HomeAssistantListEntitiesTool",
+    "HomeAssistantGetStateTool",
+    "HomeAssistantCallServiceTool",
+    "HomeAssistantTurnOnTool",
+    "HomeAssistantTurnOffTool",
+    "HomeAssistantToggleTool",
+    "HomeAssistantGetServicesTool",
+    "HomeAssistantGetConfigTool",
+    "HomeAssistantGetDevicesTool",
+    # Spotify
     "SpotifyPlayTool",
     "SpotifyPauseTool",
     "SpotifyNextTool",

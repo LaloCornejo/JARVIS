@@ -9,38 +9,23 @@
         margin: 0;
         padding: 0;
         overflow: hidden;
-        background-color: rgba(0, 0, 0, 0.1);
-        /* Semi-transparent black */
+        background-color: transparent;
         width: 100vw;
         height: 100vh;
       }
 
-      /* Make the window translucent */
       html {
-        background-color: rgba(0, 0, 0, 0.1);
+        background-color: transparent;
       }
 
-      /* Live2D canvas container */
+      /* Live2D canvas container - floating window */
       #live2d-canvas {
         position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-      }
-
-      /* Show basic content overlay */
-      .overlay {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        font-family: Arial, sans-serif;
-        padding: 10px 15px;
-        border-radius: 5px;
-        font-size: 14px;
-        z-index: 1000;
+        bottom: 0;
+        right: 0;
+        width: 100%;
+        height: 100%;
+        background-color: transparent;
       }
 
       /* Response box */
@@ -64,75 +49,24 @@
         transition: opacity 0.3s ease;
       }
 
-      /* Markdown styles */
-      #response-box p {
-        margin: 0 0 10px 0;
-      }
-
-      #response-box strong,
-      #response-box b {
-        font-weight: bold;
-      }
-
-      #response-box em,
-      #response-box i {
-        font-style: italic;
-      }
-
-      #response-box code {
-        background: rgba(255, 255, 255, 0.1);
-        padding: 2px 4px;
-        border-radius: 3px;
-        font-family: monospace;
-      }
-
-      #response-box pre {
-        background: rgba(255, 255, 255, 0.1);
-        padding: 10px;
-        border-radius: 5px;
-        overflow-x: auto;
-      }
-
-      #response-box ul,
-      #response-box ol {
-        margin: 10px 0;
-        padding-left: 20px;
-      }
-
-      #response-box li {
-        margin: 5px 0;
-      }
-
       #response-box.visible {
         opacity: 1;
       }
 
-      /* Source-specific styling */
       .source-label {
         font-weight: bold;
         margin-right: 5px;
       }
 
-      .source-telegram {
-        color: #0088cc;
-      }
-
-      .source-discord {
-        color: #5865F2;
-      }
-
-      .source-whatsapp {
-        color: #25D366;
-      }
+      .source-telegram { color: #0088cc; }
+      .source-discord { color: #5865F2; }
+      .source-whatsapp { color: #25D366; }
     </style>
   </head>
 
   <body>
     <!-- Live2D canvas -->
     <canvas id="live2d-canvas"></canvas>
-
-    <!-- Overlay content -->
-    <div class="overlay" stytle="opaciy: 0.5">JARVIS</div>
 
     <!-- Response box -->
     <div id="response-box">Connecting to JARVIS...</div>

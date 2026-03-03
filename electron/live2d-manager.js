@@ -34,14 +34,17 @@ class Live2DManager {
       }
       console.log("[DEBUG] Canvas found successfully");
 
-      // Initialize PixiJS application (PIXI.js v6 API)
+      // Initialize PixiJS application
       console.log("[DEBUG] Creating PIXI.Application...");
       this.app = new PIXI.Application({
         view: canvas,
-        transparent: true, // Transparent background
-        resizeTo: window,
+        transparent: true,
+        width: window.innerWidth,
+        height: window.innerHeight,
       });
-      console.log("[DEBUG] PIXI.Application created successfully");
+      console.log(
+        `[DEBUG] App screen: ${this.app.screen.width}x${this.app.screen.height}`,
+      );
 
       // Check if libraries are loaded
       console.log("[DEBUG] Checking PIXI availability:", typeof PIXI);
@@ -67,8 +70,8 @@ class Live2DManager {
       };
       console.log("[DEBUG] Live2D plugin configured");
 
-      // Initially allow mouse passthrough
-      ipcRenderer.send("set-ignore-mouse-events", true);
+      // Initially capture mouse events (disable passthrough)
+      ipcRenderer.send("set-ignore-mouse-events", false);
 
       this.isInitialized = true;
       console.log("[DEBUG] Live2D manager initialized successfully");
@@ -103,12 +106,19 @@ class Live2DManager {
         this.live2dModel.destroy();
       }
 
-      // Construct model path using the mapping
+      // Construct model path using the mapping - use absolute path
       const modelFileName = this.modelMapping[modelName];
-      const modelPath = `${this.modelsPath}/${modelFileName}`;
+      const basePath = window.location.href.includes("file://")
+        ? window.location.href.substring(
+            0,
+            window.location.href.lastIndexOf("/electron/"),
+          )
+        : ".";
+      const modelPath = `${basePath}/2dModels/${modelFileName}`;
 
       console.log(`[DEBUG] Model mapping for ${modelName}: ${modelFileName}`);
-      console.log(`[DEBUG] Constructed model path: ${modelPath}`);
+      console.log(`[DEBUG] Base path: ${basePath}`);
+      console.log(`[DEBUG] Full model path: ${modelPath}`);
       console.log(
         `[DEBUG] Attempting to load from: ${window.location.origin}/${modelPath}`,
       );
@@ -135,18 +145,25 @@ class Live2DManager {
           `[DEBUG] Fetch check failed for path: ${modelPath}`,
           fetchError,
         );
-        // Continue anyway, as Live2D might handle the loading differently
       }
 
       this.live2dModel = await PIXI.live2d.Live2DModel.from(modelPath);
       console.log(`[DEBUG] Model loaded successfully!`);
+      console.log(
+        `[DEBUG] Model width: ${this.live2dModel.width}, height: ${this.live2dModel.height}`,
+      );
 
-      // Set model properties
-      this.live2dModel.scale.set(0.08); // Scale down the model
-      this.live2dModel.anchor.set(-2.2, -0.2); // Center the model
-      this.live2dModel.position.set(
-        this.app.screen.width / 2,
-        this.app.screen.height / 2,
+      // Set model properties - small, bottom right
+      const canvasWidth = this.app.screen.width;
+      const canvasHeight = this.app.screen.height;
+
+      const scale = (canvasHeight / 8500) * 0.8;
+      this.live2dModel.scale.set(scale);
+      this.live2dModel.anchor.set(0.5, 1); // anchor at bottom center
+      this.live2dModel.x = canvasWidth - 150;
+      this.live2dModel.y = canvasHeight + 400;
+      console.log(
+        `[DEBUG] Model scale: ${scale}, at: ${canvasWidth - 150}, ${canvasHeight - 20}`,
       );
 
       // Add to stage
@@ -161,7 +178,7 @@ class Live2DManager {
       this.isHovering = false;
       this.isCtrlPressed = false;
       this.isShiftPressed = false;
-      this.targetOpacity = 0;
+      this.targetOpacity = 1;
       this.dragOffset = { x: 0, y: 0 };
 
       // Opacity animation
@@ -172,23 +189,21 @@ class Live2DManager {
           (this.targetOpacity - this.live2dModel.alpha) * lerpFactor;
       });
 
-      // Hover events
+      // Hover events - fade to transparent on hover
       this.live2dModel.on("pointerover", () => {
         this.isHovering = true;
+        this.targetOpacity = 0;
         if (this.isCtrlPressed && this.isShiftPressed) {
           this.live2dModel.cursor = "grab";
-          this.targetOpacity = 1;
-          ipcRenderer.send("set-ignore-mouse-events", false);
         } else {
-          ipcRenderer.send("set-ignore-mouse-events", true);
+          this.live2dModel.cursor = "default";
         }
       });
 
       this.live2dModel.on("pointerout", () => {
         this.isHovering = false;
+        this.targetOpacity = 1;
         this.live2dModel.cursor = "default";
-        this.targetOpacity = 0;
-        ipcRenderer.send("set-ignore-mouse-events", true);
       });
 
       // Dragging events
@@ -226,14 +241,12 @@ class Live2DManager {
         }
       });
 
-      // Key events for Ctrl + Shift
+      // Key events for Ctrl + Shift (just for dragging, no passthrough)
       window.addEventListener("keydown", (event) => {
         if (event.key === "Control") this.isCtrlPressed = true;
         if (event.key === "Shift") this.isShiftPressed = true;
         if (this.isCtrlPressed && this.isShiftPressed && this.isHovering) {
           this.live2dModel.cursor = "grab";
-          this.targetOpacity = 1;
-          ipcRenderer.send("set-ignore-mouse-events", false);
         }
       });
 
@@ -242,8 +255,6 @@ class Live2DManager {
         if (event.key === "Shift") this.isShiftPressed = false;
         if (!(this.isCtrlPressed && this.isShiftPressed)) {
           this.live2dModel.cursor = "default";
-          this.targetOpacity = 0;
-          ipcRenderer.send("set-ignore-mouse-events", true);
         }
       });
 
@@ -307,19 +318,118 @@ class Live2DManager {
     if (!this.live2dModel) return;
 
     try {
-      // Try to play an idle motion (looping)
-      const motions = this.live2dModel.internalModel.motionManager.motions;
-      if (motions && motions.idle && motions.idle.length > 0) {
-        this.live2dModel.startMotion("idle", 0, 1);
+      const motions = this.live2dModel.internalModel?.motionManager?.motions;
+      const expressions =
+        this.live2dModel.internalModel?.motionManager?.expressionManager
+          ?.expressions;
+
+      console.log(
+        "[Live2D] Available motion groups:",
+        motions ? Object.keys(motions) : "none",
+      );
+      console.log(
+        "[Live2D] Available expressions:",
+        expressions ? Object.keys(expressions) : "none",
+      );
+
+      if (motions && motions.Idle && motions.Idle.length > 0) {
+        console.log("[Live2D] Starting Idle motion");
+        this.live2dModel.internalModel.motionManager.startMotion("Idle", 0, 2);
       } else if (motions && Object.keys(motions).length > 0) {
-        // Play first available motion (looping)
         const firstMotionGroup = Object.keys(motions)[0];
-        this.live2dModel.startMotion(firstMotionGroup, 0, 1);
+        console.log(
+          `[Live2D] No Idle found, playing first motion: ${firstMotionGroup}`,
+        );
+        this.live2dModel.internalModel.motionManager.startMotion(
+          firstMotionGroup,
+          0,
+          2,
+        );
       } else {
-        console.log("No motions found in model");
+        console.log("[Live2D] No motions found in model");
       }
+
+      if (this.live2dModel.internalModel.motionManager.eyeBlink) {
+        try {
+          this.live2dModel.internalModel.motionManager.eyeBlink.enable();
+          console.log("[Live2D] Eye blinking enabled");
+        } catch (e) {}
+      }
+
+      if (this.live2dModel.internalModel.physics) {
+        try {
+          this.live2dModel.internalModel.physics.enable();
+          console.log("[Live2D] Physics enabled");
+        } catch (e) {}
+      }
+
+      // Start random idle expression cycling
+      this.startIdleExpressionCycle(expressions);
     } catch (error) {
-      console.log("Could not start idle animation:", error);
+      console.log("[Live2D] Could not start idle animation:", error);
+    }
+  }
+
+  startIdleExpressionCycle(expressions) {
+    if (!expressions || Object.keys(expressions).length === 0) return;
+
+    const expressionKeys = Object.keys(expressions);
+    const neutralExpressions = expressionKeys.filter(
+      (k) =>
+        !k.includes("生气") &&
+        !k.includes("泪") &&
+        !k.includes("血") &&
+        !k.includes("脸黑"),
+    );
+
+    if (neutralExpressions.length === 0) return;
+
+    // Clear any existing interval
+    if (this.idleExpressionInterval) {
+      clearInterval(this.idleExpressionInterval);
+    }
+
+    // Random expression every 3-8 seconds
+    const cycleExpression = () => {
+      try {
+        const randomExp =
+          neutralExpressions[
+            Math.floor(Math.random() * neutralExpressions.length)
+          ];
+        const expressionManager =
+          this.live2dModel.internalModel.motionManager.expressionManager;
+        expressionManager.setExpression(randomExp);
+        console.log(`[Live2D] Idle expression: ${randomExp}`);
+
+        // Return to default after 2-4 seconds
+        const returnTimeout = setTimeout(
+          () => {
+            try {
+              expressionManager.setExpression("Idle") ||
+                expressionManager.setExpression("neutral") ||
+                expressionManager.setExpression(expressionKeys[0]);
+            } catch (e) {}
+          },
+          2000 + Math.random() * 2000,
+        );
+      } catch (e) {}
+
+      const nextCycle = 3000 + Math.random() * 5000;
+      this.idleExpressionTimeout = setTimeout(cycleExpression, nextCycle);
+    };
+
+    // Start first cycle after 5 seconds
+    this.idleExpressionTimeout = setTimeout(cycleExpression, 5000);
+  }
+
+  stopIdleExpressionCycle() {
+    if (this.idleExpressionInterval) {
+      clearInterval(this.idleExpressionInterval);
+      this.idleExpressionInterval = null;
+    }
+    if (this.idleExpressionTimeout) {
+      clearTimeout(this.idleExpressionTimeout);
+      this.idleExpressionTimeout = null;
     }
   }
 
@@ -327,19 +437,78 @@ class Live2DManager {
     if (!this.live2dModel) return;
 
     try {
-      this.live2dModel.motion(motionName, priority);
+      const motionManager = this.live2dModel.internalModel.motionManager;
+      const motions = motionManager?.motions;
+
+      if (!motions) {
+        console.log(`[Live2D] No motions available`);
+        return;
+      }
+
+      // Try exact match first, then case-insensitive search
+      let targetMotion = motionName;
+      if (!motions[motionName]) {
+        const keys = Object.keys(motions);
+        targetMotion = keys.find(
+          (k) => k.toLowerCase() === motionName.toLowerCase(),
+        );
+      }
+
+      if (targetMotion && motions[targetMotion]) {
+        console.log(`[Live2D] Playing motion: ${targetMotion}`);
+        motionManager.startMotion(targetMotion, 0, priority);
+      } else {
+        console.log(
+          `[Live2D] Motion "${motionName}" not found. Available: ${Object.keys(motions).join(", ")}`,
+        );
+      }
     } catch (error) {
-      console.log(`Could not play motion ${motionName}:`, error);
+      console.log(`[Live2D] Could not play motion ${motionName}:`, error);
     }
   }
 
   setExpression(expressionName) {
     if (!this.live2dModel) return;
 
+    // Stop idle expression cycle when manual expression is set
+    this.stopIdleExpressionCycle();
+
     try {
-      this.live2dModel.expression(expressionName);
+      const expressionManager =
+        this.live2dModel.internalModel?.motionManager?.expressionManager;
+      const expressions = expressionManager?.expressions;
+
+      if (!expressions) {
+        console.log(`[Live2D] No expressions available`);
+        return;
+      }
+
+      let targetExpression = expressionName;
+      if (!expressions[expressionName]) {
+        const keys = Object.keys(expressions);
+        targetExpression = keys.find(
+          (k) => k.toLowerCase() === expressionName.toLowerCase(),
+        );
+      }
+
+      if (targetExpression && expressions[targetExpression]) {
+        console.log(`[Live2D] Setting expression: ${targetExpression}`);
+        expressionManager.setExpression(targetExpression);
+      } else {
+        console.log(
+          `[Live2D] Expression "${expressionName}" not found. Available: ${Object.keys(expressions).join(", ")}`,
+        );
+      }
+
+      // Resume idle cycle after 3 seconds
+      setTimeout(() => {
+        this.startIdleExpressionCycle(expressions);
+      }, 3000);
     } catch (error) {
-      console.log(`Could not set expression ${expressionName}:`, error);
+      console.log(
+        `[Live2D] Could not set expression ${expressionName}:`,
+        error,
+      );
     }
   }
 
