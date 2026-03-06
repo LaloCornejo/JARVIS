@@ -2,8 +2,8 @@
 
 import json
 import logging
-import sys
 import os
+import sys
 from typing import Set
 
 # Load environment variables from .env file
@@ -11,14 +11,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from core.discord_bot import discord_bot_handler
+from core.telegram_bot import telegram_bot_handler
+from core.whatsapp_bailey_client import whatsapp_bailey_client
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from rich.console import Console
 from rich.logging import RichHandler
 
-from core.discord_bot import discord_bot_handler
-from core.telegram_bot import telegram_bot_handler
-from core.whatsapp_bailey_client import whatsapp_bailey_client
 from jarvis.server import JarvisServer
 
 log = logging.getLogger("jarvis.websocket")
@@ -87,9 +87,9 @@ async def health_check():
     return {
         "status": "healthy",
         "services": {
-            "telegram": telegram_bot_handler.is_running() if telegram_bot_handler else False,
-            "discord": discord_bot_handler.is_running() if discord_bot_handler else False,
-            "whatsapp": whatsapp_bailey_client.is_running() if whatsapp_bailey_client else False,
+            "telegram": (telegram_bot_handler.is_running() if telegram_bot_handler else False),
+            "discord": (discord_bot_handler.is_running() if discord_bot_handler else False),
+            "whatsapp": (whatsapp_bailey_client.is_running() if whatsapp_bailey_client else False),
         },
         "rate_limiting": rate_limiter_manager.get_limiters_status(),
     }
@@ -102,7 +102,7 @@ connected_clients: Set[WebSocket] = set()
 
 async def broadcast(message: dict):
     """Broadcast a message to all connected WebSocket clients"""
-    print(f"Broadcasting {message.get('type', 'unknown')} to {len(connected_clients)} clients")
+    # print(f"Broadcasting {message.get('type', 'unknown')} to {len(connected_clients)} clients")
     if len(connected_clients) > 0:
         log.info(
             f"[WEBSOCKET] Broadcasting {message.get('type', 'unknown')} to {len(connected_clients)} clients"

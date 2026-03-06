@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from agents.base import AgentContext, AgentRole, BaseAgent
 from core.llm import OllamaClient
+from core.config import Config
 
 log = logging.getLogger(__name__)
 
@@ -91,7 +92,13 @@ Respond in JSON format with:
 
     def __init__(self, llm_client: Optional[OllamaClient] = None):
         super().__init__()
-        self.llm = llm_client or OllamaClient()
+        if llm_client is None:
+            config = Config()
+            model = config.get("ollama.primary_model")
+            if not model:
+                raise ValueError("ollama.primary_model must be configured in settings.yaml")
+            llm_client = OllamaClient(model=model, base_url=config.get("ollama.api_url"))
+        self.llm = llm_client
         self.supported_languages = {
             "python",
             "javascript",

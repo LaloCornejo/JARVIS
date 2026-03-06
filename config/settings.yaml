@@ -7,14 +7,25 @@ llm:
   backend: ollama
   temperature: 0.6
   stream: true
+  primary_model: null  # Will use backend-specific primary model
+  fast_model: null  # Will use backend-specific fast model
+  vision_model: null  # Will use backend-specific vision model
+  fallback_model: null  # Will use backend-specific fallback model
 
 ollama:
   api_url: http://localhost:11434
   primary_model: huihui_ai/qwen3.5-abliterated:2b
   fast_model: huihui_ai/qwen3.5-abliterated:2b
-  vision_model: huihui_ai/qwen3.5-abliterated:2b
+  vision_model: huihui_ai/qwen3-vl-abliterated:4b
   fallback_model: huihui_ai/qwen3.5-abliterated:2b
   preload: true
+
+copilot:
+  api_url: https://api.githubcopilot.com
+  primary_model: claude-sonnet-4.5
+  fast_model: claude-sonnet-4.5
+  vision_model: claude-sonnet-4.5
+  fallback_model: claude-sonnet-4.5
 
 nvidia:
   api_url: https://integrate.api.nvidia.com/v1

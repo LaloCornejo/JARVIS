@@ -140,6 +140,35 @@ class WhatsAppBaileyClient:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    async def send_image_message(
+        self,
+        to: str,
+        image_path: str,
+        caption: str | None = None,
+    ) -> dict:
+        try:
+            import base64
+
+            with open(image_path, "rb") as f:
+                image_data = base64.b64encode(f.read()).decode("utf-8")
+
+            client = await self._get_client()
+            response = await client.post(
+                f"{self.service_url}/send-image",
+                json={
+                    "to": to,
+                    "image_base64": image_data,
+                    "caption": caption,
+                },
+            )
+            return response.json()
+        except FileNotFoundError:
+            log.error(f"[WhatsApp] Image file not found: {image_path}")
+            return {"success": False, "error": "Image file not found"}
+        except Exception as e:
+            log.error(f"[WhatsApp] Error sending image: {e}")
+            return {"success": False, "error": str(e)}
+
     async def disconnect(self) -> dict:
         try:
             client = await self._get_client()
@@ -191,17 +220,31 @@ class WhatsAppBaileyClient:
 
         try:
             full_response = ""
+            screenshot_path = None
 
             async def capture_broadcast(message: dict) -> None:
-                nonlocal full_response
+                nonlocal full_response, screenshot_path
                 if message.get("type") == "message_complete":
                     full_response = message.get("full_response", "")
+                    if message.get("screenshot_path"):
+                        screenshot_path = message.get("screenshot_path")
+                        log.info(f"[WhatsApp] Vision screenshot detected: {screenshot_path}")
+                elif message.get("type") == "streaming_chunk":
+                    if message.get("screenshot_path"):
+                        screenshot_path = message.get("screenshot_path")
 
             await self.jarvis.process_message(content, broadcast_func=capture_broadcast)
 
             if full_response:
                 session.add_message("assistant", full_response)
                 await self.send_long_message(sender, full_response)
+
+                if screenshot_path:
+                    try:
+                        log.info(f"[WhatsApp] Sending vision screenshot to user: {screenshot_path}")
+                        await self.send_image_message(sender, screenshot_path, full_response[:1000])
+                    except Exception as e:
+                        log.error(f"[WhatsApp] Error sending screenshot: {e}")
 
         except Exception as e:
             log.error(f"[WhatsApp] Error processing message: {e}")

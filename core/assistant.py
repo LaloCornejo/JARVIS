@@ -75,9 +75,12 @@ class VoiceAssistant:
         data_dir.mkdir(exist_ok=True)
 
         log.debug("Initializing OllamaClient: %s", self.config.llm_url)
+        ollama_model = self.config.get("ollama.primary_model")
+        if not ollama_model:
+            raise ValueError("ollama.primary_model must be configured in settings.yaml")
         self.ollama = OllamaClient(
             base_url=self.config.llm_url,
-            model=self.config.get("llm.primary_model", "huihui_ai/qwen3.5-abliterated:2b"),
+            model=ollama_model,
         )
         self._preload_ollama = self.config.get("ollama.preload", False)
 
@@ -86,9 +89,14 @@ class VoiceAssistant:
         self.copilot = None
 
         primary_backend = self.config.get("llm.backend", "ollama")
+        copilot_model = self.config.get("copilot.primary_model")
+        gemini_model = self.config.get("gemini.primary_model")
+
         self.router = ModelRouter(
             ollama_client=self.ollama,
-            ollama_model=self.config.get("llm.primary_model", "huihui_ai/qwen3.5-abliterated:2b"),
+            ollama_model=ollama_model,
+            copilot_model=copilot_model,
+            gemini_model=gemini_model,
             primary_backend=primary_backend,
         )
         self.llm = self.ollama
@@ -352,6 +360,15 @@ class VoiceAssistant:
     async def generate_response(self, text: str) -> str | None:
         log.info("generate_response called with: %s", text)
 
+        tools_used = []
+
+        from core.commands import process_command
+
+        cmd_result = await process_command(text)
+        if cmd_result:
+            log.info(f"Command handled: {cmd_result.response[:50]}...")
+            return cmd_result.response
+
         if self.websocket:
             # Send to WebSocket server for processing
             import json
@@ -424,35 +441,6 @@ class VoiceAssistant:
             backend, model = selection.backend, selection.model
             log.info("Model auto-selected: %s/%s", backend, model)
 
-        # Enhanced system prompt with memory context
-        system_prompt = (
-            "You are JARVIS, a helpful AI assistant. Be concise and direct. "
-            "You have access to many tools. ALWAYS use tools when you need to get information "
-            "about the system, files, applications, or perform any actions. "
-            "Do NOT say you cannot do something if there is a tool available for it."
-        )
-
-        # Phase 6: Add user context if available
-        if self._current_user_id:
-            try:
-                user_manager = await self._get_user_manager()
-                user = await user_manager.get_user(self._current_user_id)
-                if user:
-                    system_prompt += f"\n\nYou are speaking with {user.name}."
-                    if user.preferences.get("formality") == "casual":
-                        system_prompt += " Use a casual, friendly tone."
-                    elif user.preferences.get("formality") == "formal":
-                        system_prompt += " Use a formal, professional tone."
-            except Exception as e:
-                log.debug(f"Failed to get user context: {e}")
-
-        # Add memory context if available
-        if relevant_memories:
-            system_prompt += "\n\nRelevant information about the user:"
-            for memory in relevant_memories:
-                system_prompt += f"\n- {memory['fact']} ({memory['category']})"
-            system_prompt += "\n\nUse this information to personalize your responses."
-
         full_response = ""
         tool_calls = []
         success = True
@@ -471,10 +459,61 @@ class VoiceAssistant:
                 f"Smart context: {context_decision.reasoning}, messages={len(recent_messages)}"
             )
 
+            available_tools = []
+            if tool_schemas:
+                for schema in tool_schemas:
+                    if isinstance(schema, dict) and "function" in schema:
+                        func = schema.get("function", {})
+                        name = func.get("name", "")
+                        if name:
+                            available_tools.append(name)
+
+            from core.skills import get_skill_loader
+
+            skill_loader = get_skill_loader()
+            available_skills = list(skill_loader.get_all_skills().keys())
+
+            tools_and_skills_str = (
+                f"[TOOLS: {', '.join(available_tools)} | SKILLS: {', '.join(available_skills)}]"
+            )
+
+            system_prompt = (
+                f"You are JARVIS, a helpful AI assistant. Be concise and direct. "
+                f"You have access to many tools. ALWAYS use tools when you need to get information "
+                f"about the system, files, applications, or perform any actions. "
+                f"Do NOT say you cannot do something if there is a tool available for it.\n\n"
+                f"{tools_and_skills_str}"
+            )
+
+            if self._current_user_id:
+                try:
+                    user_manager = await self._get_user_manager()
+                    user = await user_manager.get_user(self._current_user_id)
+                    if user:
+                        system_prompt += f"\n\nYou are speaking with {user.name}."
+                        if user.preferences.get("formality") == "casual":
+                            system_prompt += " Use a casual, friendly tone."
+                        elif user.preferences.get("formality") == "formal":
+                            system_prompt += " Use a formal, professional tone."
+                except Exception as e:
+                    log.debug(f"Failed to get user context: {e}")
+
+            if relevant_memories:
+                system_prompt += "\n\nRelevant information about the user:"
+                for memory in relevant_memories:
+                    system_prompt += f"\n- {memory['fact']} ({memory['category']})"
+                system_prompt += "\n\nUse this information to personalize your responses."
+
             if context_decision.semantic_memories:
                 system_prompt += "\n\nRelevant past context:"
                 for mem in context_decision.semantic_memories:
                     system_prompt += f"\n- {mem['text'][:100]}"
+
+            from core.skills import get_skill_prompt_context
+
+            skills_context = get_skill_prompt_context()
+            if skills_context:
+                system_prompt += "\n\n" + skills_context
 
             async for chunk in client.chat(
                 messages=recent_messages,
@@ -498,6 +537,7 @@ class VoiceAssistant:
 
             if tool_calls and self.tools:
                 tool_names = [c.get("function", {}).get("name") for c in tool_calls]
+                tools_used.extend([n for n in tool_names if n])
                 log.info("Processing %d tool calls: %s", len(tool_calls), tool_names)
                 await self._conversation_buffer.add_message(
                     {"role": "assistant", "content": full_response, "tool_calls": tool_calls}
@@ -580,6 +620,8 @@ class VoiceAssistant:
         # Check for tool calls in the response text
         additional_tool_calls = self._parse_tool_calls_from_text(full_response)
         if additional_tool_calls and self.tools:
+            additional_names = [c.get("function", {}).get("name") for c in additional_tool_calls]
+            tools_used.extend([n for n in additional_names if n])
             log.info("Found %d tool calls in response text", len(additional_tool_calls))
             tool_calls.extend(additional_tool_calls)
             # Re-process tool calls
@@ -653,6 +695,22 @@ class VoiceAssistant:
         )
 
         self.proactive.extract_deadline_from_text(text)
+
+        header_parts = []
+
+        if tools_used:
+            unique_tools = list(dict.fromkeys(tools_used))
+            header_parts.append(f"TOOLS: {', '.join(unique_tools)}")
+
+        from core.skills import detect_skills_used
+
+        skills_detected = detect_skills_used(text, full_response)
+        if skills_detected:
+            header_parts.append(f"SKILLS: {', '.join(skills_detected)}")
+
+        if header_parts:
+            header = "[" + " | ".join(header_parts) + "]\n\n"
+            full_response = header + full_response
 
         return full_response
 

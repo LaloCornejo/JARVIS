@@ -27,6 +27,7 @@ from agents.specialized.legacy import (
 from core.llm import OllamaClient
 from core.memory import ConversationMemory
 from core.rag import RAGEngine
+from core.config import Config
 from tools.registry import ToolRegistry, get_tool_registry
 
 from .advanced import (
@@ -70,7 +71,13 @@ class Orchestrator:
         memory: ConversationMemory | None = None,
         rag: RAGEngine | None = None,
     ):
-        self.llm = llm or OllamaClient()
+        if llm is None:
+            config = Config()
+            model = config.get("ollama.primary_model")
+            if not model:
+                raise ValueError("ollama.primary_model must be configured in settings.yaml")
+            llm = OllamaClient(model=model, base_url=config.get("ollama.api_url"))
+        self.llm = llm
         self.tools = tools or get_tool_registry()
         self.memory = memory or ConversationMemory()
         self.rag = rag

@@ -145,6 +145,8 @@ class JarvisServer:
     async def process_message(self, user_input: str, broadcast_func=None) -> None:
         log.warning(f"[SERVER] Processing message: {len(user_input)} chars")
 
+        vision_screenshot_path = None
+
         self.messages.append({"role": "user", "content": user_input})
         await conversation_buffer.add_message({"role": "user", "content": user_input})
 
@@ -410,12 +412,14 @@ class JarvisServer:
             self.messages.extend(tool_results)
 
             is_vision_tool = "screenshot_analyze" in tool_names
+            vision_screenshot_path = None
             if is_vision_tool and tool_results:
                 try:
                     vision_data = json.loads(tool_results[0].get("content", "{}"))
                     full_response = vision_data.get("analysis", "")
+                    vision_screenshot_path = vision_data.get("screenshot_path")
                     log.warning(
-                        f"[SERVER] Using vision response directly: {len(full_response)} chars"
+                        f"[SERVER] Using vision response directly: {len(full_response)} chars, screenshot: {vision_screenshot_path}"
                     )
                     if broadcast_func:
                         await broadcast_func(
@@ -423,6 +427,7 @@ class JarvisServer:
                                 "type": "streaming_chunk",
                                 "content": full_response,
                                 "replace": True,
+                                "screenshot_path": vision_screenshot_path,
                             }
                         )
                 except Exception as e:
@@ -480,8 +485,9 @@ class JarvisServer:
                         try:
                             vision_data = json.loads(tool_results[0].get("content", "{}"))
                             full_response = vision_data.get("analysis", "")
+                            vision_screenshot_path = vision_data.get("screenshot_path")
                             log.warning(
-                                f"[SERVER] Using vision response directly: {len(full_response)} chars"
+                                f"[SERVER] Using vision response directly: {len(full_response)} chars, screenshot: {vision_screenshot_path}"
                             )
                             if broadcast_func:
                                 await broadcast_func(
@@ -489,6 +495,7 @@ class JarvisServer:
                                         "type": "streaming_chunk",
                                         "content": full_response,
                                         "replace": True,
+                                        "screenshot_path": vision_screenshot_path,
                                     }
                                 )
                             break  # Vision tool is done
@@ -641,7 +648,13 @@ class JarvisServer:
             log.warning("[SERVER] Skipping empty assistant message append")
 
         if broadcast_func:
-            await broadcast_func({"type": "message_complete", "full_response": clean_response})
+            await broadcast_func(
+                {
+                    "type": "message_complete",
+                    "full_response": clean_response,
+                    "screenshot_path": vision_screenshot_path,
+                }
+            )
 
         if should_cache_response(user_input, clean_response):
             await intent_cache.set(cache_key, clean_response)
@@ -1024,17 +1037,24 @@ class JarvisServer:
             f"current total {len(tool_calls)}, source={source}"
         )
         for i, call in enumerate(new_calls):
+            args_val = call.get("function", {}).get("arguments")
+            args_repr = repr(str(args_val)[:50]) if args_val is not None else "None"
             log.warning(
                 f"[SERVER] Processing new call {i}: id={call.get('id')}, "
                 f"name={call.get('function', {}).get('name')}, "
-                f"args={repr(call.get('function', {}).get('arguments'))[:50]}"
+                f"args={args_repr}"
             )
         for call in new_calls:
             idx = call.get("index", 0)
             call_id = call.get("id")
             fn = call.get("function", {})
             name = fn.get("name")
-            args_fragment = fn.get("arguments") or ""
+            args_fragment = fn.get("arguments")
+
+            if isinstance(args_fragment, dict):
+                args_fragment = json.dumps(args_fragment)
+            elif not isinstance(args_fragment, str):
+                args_fragment = str(args_fragment) if args_fragment else ""
 
             # Find existing call by index
             existing = None
@@ -1044,9 +1064,18 @@ class JarvisServer:
                     break
 
             if existing:
-                # Accumulate arguments by concatenation
                 if args_fragment:
-                    existing_args = existing.get("function", {}).get("arguments") or ""
+                    existing_args = existing.get("function", {}).get("arguments")
+                    if isinstance(existing_args, dict):
+                        existing_args = json.dumps(existing_args)
+                    elif not isinstance(existing_args, str):
+                        existing_args = str(existing_args) if existing_args else ""
+
+                    if isinstance(args_fragment, dict):
+                        args_fragment = json.dumps(args_fragment)
+                    elif not isinstance(args_fragment, str):
+                        args_fragment = str(args_fragment) if args_fragment else ""
+
                     combined_args = existing_args + args_fragment
                     existing["function"]["arguments"] = combined_args
                     log.warning(

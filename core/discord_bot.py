@@ -329,10 +329,10 @@ class DiscordBotHandler:
             "bot_user_id": self._bot_user_id,
             "active_sessions": len(self._sessions),
             "sessions": [s.to_dict() for s in self._sessions.values()],
-            "allowed_channel_ids": list(self.allowed_channel_ids)
-            if self.allowed_channel_ids
-            else None,
-            "allowed_guild_ids": list(self.allowed_guild_ids) if self.allowed_guild_ids else None,
+            "allowed_channel_ids": (
+                list(self.allowed_channel_ids) if self.allowed_channel_ids else None
+            ),
+            "allowed_guild_ids": (list(self.allowed_guild_ids) if self.allowed_guild_ids else None),
         }
 
     async def _websocket_loop(self) -> None:
@@ -707,25 +707,31 @@ class DiscordBotHandler:
             full_response = ""
             thinking_text = None
             response_chunks = []
+            screenshot_path = None
 
             async def capture_broadcast(message: dict) -> None:
                 try:
-                    nonlocal full_response, thinking_text
+                    nonlocal full_response, thinking_text, screenshot_path
                     message_type = message.get("type")
-                    log.debug(f"[DISCORD] Received broadcast message: {message_type}")
+                    # log.debug(f"[DISCORD] Received broadcast message: {message_type}")
                     if message_type == "streaming_chunk":
                         content = message.get("content") or ""
                         if content:
                             log.debug(f"[DISCORD] Received streaming chunk: {len(content)} chars")
                             response_chunks.append(content)
+                        if message.get("screenshot_path"):
+                            screenshot_path = message.get("screenshot_path")
+                            log.info(f"[DISCORD] Vision screenshot detected: {screenshot_path}")
                     elif message_type == "thinking_complete":
                         thinking_text = message.get("content", "")
-                        log.debug(f"[DISCORD] Received thinking: {len(thinking_text)} chars")
+                        # log.debug(f"[DISCORD] Received thinking: {len(thinking_text)} chars")
                     elif message_type == "message_complete":
                         full_response = message.get("full_response", "")
                         log.debug(
                             f"[DISCORD] Received message complete: {len(full_response)} chars"
                         )
+                        if message.get("screenshot_path"):
+                            screenshot_path = message.get("screenshot_path")
                     elif message_type == "user_message":
                         log.debug(
                             f"[DISCORD] Received user message echo (from WebSocket broadcast)"
@@ -733,10 +739,12 @@ class DiscordBotHandler:
                     elif message_type == "assistant_message":
                         log.debug(f"[DISCORD] Received assistant message echo")
                     elif message_type == "thinking_chunk":
-                        log.debug(f"[DISCORD] Received thinking chunk")
+                        # log.debug(
+                        # f"[DISCORD] Received thinking chunk"
+                        # )
+                        pass
                     elif message_type:
                         log.debug(f"[DISCORD] Received unhandled message type: {message_type}")
-
                     try:
                         await _broadcast_to_websockets(message)
                     except Exception as e:
@@ -822,10 +830,26 @@ class DiscordBotHandler:
                 else:
                     await self._send_long_message(channel_id, full_response, reply_to=message_id)
 
+                if screenshot_path:
+                    try:
+                        log.info(
+                            f"[DISCORD] Sending vision screenshot to channel: {screenshot_path}"
+                        )
+                        await self._send_image_message(
+                            channel_id,
+                            screenshot_path,
+                            full_response[:1500],
+                            reply_to=message_id,
+                        )
+                    except Exception as e:
+                        log.error(f"[DISCORD] Error sending screenshot: {e}")
+
             else:
                 log.warning("[DISCORD] No response from JARVIS")
                 await self._send_message(
-                    channel_id, "I didn't get a response. Please try again.", reply_to=message_id
+                    channel_id,
+                    "I didn't get a response. Please try again.",
+                    reply_to=message_id,
                 )
         except Exception as e:
             log.error(f"[DISCORD] Error processing message: {e}", exc_info=True)
@@ -925,6 +949,53 @@ class DiscordBotHandler:
                 return None
         except Exception as e:
             log.error(f"[DISCORD] Error sending audio message: {e}")
+            return None
+
+    async def _send_image_message(
+        self,
+        channel_id: str,
+        image_path: str,
+        caption: str | None = None,
+        reply_to: str | None = None,
+    ) -> dict | None:
+        if not self._http_client:
+            return None
+        try:
+            import io
+
+            with open(image_path, "rb") as f:
+                image_data = f.read()
+
+            image_file = io.BytesIO(image_data)
+            image_file.seek(0)
+            payload_data = {}
+            if caption:
+                payload_data["content"] = caption
+            if reply_to:
+                payload_data["message_reference"] = {"message_id": reply_to}
+
+            ext = image_path.split(".")[-1].lower() if "." in image_path else "png"
+            mime_type = (
+                f"image/{ext}" if ext in ["jpeg", "jpg", "png", "gif", "webp"] else "image/png"
+            )
+
+            files = {"file": (f"screenshot.{ext}", image_file, mime_type)}
+            data = {"payload_json": json.dumps(payload_data)}
+            response = await self._http_client.post(
+                f"{self.API_URL}/channels/{channel_id}/messages",
+                files=files,
+                data=data,
+            )
+            if response.status_code in (200, 201):
+                result = response.json()
+                log.info(f"[DISCORD] Image message sent successfully to channel {channel_id}")
+                return result
+            else:
+                log.error(f"[DISCORD] Failed to send image message: {response.status_code}")
+                log.error(f"[DISCORD] Response: {response.text}")
+                return None
+        except Exception as e:
+            log.error(f"[DISCORD] Error sending image message: {e}")
             return None
 
     async def _send_long_message(

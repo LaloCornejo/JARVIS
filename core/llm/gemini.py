@@ -38,9 +38,12 @@ class GeminiClient:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "gemini-2.5-flash",
+        model: str | None = None,
         timeout: float = 120.0,
     ):
+        if model is None:
+            raise ValueError("model is required and must be provided from config")
+
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
         self.model = model
         self.timeout = timeout

@@ -348,17 +348,22 @@ class TelegramBotHandler:
 
         try:
             # Process through JARVIS server
-            # Collect streaming response
             full_response = ""
+            screenshot_path = None
 
             response_chunks = []
 
             async def capture_broadcast(message: dict) -> None:
-                nonlocal full_response
+                nonlocal full_response, screenshot_path
                 if message.get("type") == "streaming_chunk":
                     response_chunks.append(message.get("content", ""))
+                    if message.get("screenshot_path"):
+                        screenshot_path = message.get("screenshot_path")
+                        log.info(f"[TELEGRAM] Vision screenshot detected: {screenshot_path}")
                 elif message.get("type") == "message_complete":
                     full_response = message.get("full_response", "")
+                    if message.get("screenshot_path"):
+                        screenshot_path = message.get("screenshot_path")
 
                 try:
                     await _broadcast_to_websockets(message)
@@ -405,11 +410,18 @@ class TelegramBotHandler:
                         log.info("[TELEGRAM] Audio message sent successfully")
                     except Exception as e:
                         log.error(f"[TELEGRAM] Error generating/sending TTS: {e}")
-                        # Fallback to text message
                         await self._send_long_message(chat_id, full_response)
                 else:
-                    # Send text response
                     await self._send_long_message(chat_id, full_response)
+
+                if screenshot_path:
+                    try:
+                        log.info(f"[TELEGRAM] Sending vision screenshot to chat: {screenshot_path}")
+                        await self._send_photo_message(
+                            chat_id, screenshot_path, full_response[:1000]
+                        )
+                    except Exception as e:
+                        log.error(f"[TELEGRAM] Error sending screenshot: {e}")
             else:
                 await self._send_message(chat_id, "🤔 I didn't get a response. Please try again.")
 
@@ -463,16 +475,12 @@ class TelegramBotHandler:
         filename: str = "response.mp3",
         text_content: str | None = None,
     ) -> None:
-        """Send an audio message to Telegram with optional text content."""
         try:
-            # Send the audio file using the Telegram client directly from memory
             result = await self.client.send_document(
                 chat_id=chat_id,
                 document_data=audio_data,
                 filename=filename,
-                caption=text_content[:1024]
-                if text_content
-                else None,  # Telegram caption limit is 1024 chars
+                caption=text_content[:1024] if text_content else None,
             )
 
             if result:
@@ -484,9 +492,27 @@ class TelegramBotHandler:
                     await self._send_long_message(chat_id, text_content)
         except Exception as e:
             log.error(f"[TELEGRAM] Error sending audio message: {e}")
-            # Fallback to text message
             if text_content:
                 await self._send_long_message(chat_id, text_content)
+
+    async def _send_photo_message(
+        self,
+        chat_id: int | str,
+        photo_path: str,
+        caption: str | None = None,
+    ) -> None:
+        try:
+            result = await self.client.send_photo(
+                chat_id=chat_id,
+                photo_path=photo_path,
+                caption=caption,
+            )
+            if result:
+                log.info(f"[TELEGRAM] Photo sent successfully to chat {chat_id}")
+            else:
+                log.error("[TELEGRAM] Failed to send photo")
+        except Exception as e:
+            log.error(f"[TELEGRAM] Error sending photo: {e}")
 
     def _get_or_create_session(
         self,

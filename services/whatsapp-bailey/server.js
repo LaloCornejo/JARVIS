@@ -236,6 +236,40 @@ app.post('/send-media', async (req, res) => {
   }
 });
 
+app.post('/send-image', async (req, res) => {
+  const { to, image_base64, caption } = req.body;
+  
+  if (!to || !image_base64) {
+    return res.status(400).json({ error: 'Missing required fields: to, image_base64' });
+  }
+  
+  if (!sock || !sock.user) {
+    return res.status(503).json({ error: 'WhatsApp not connected' });
+  }
+  
+  try {
+    let jid = to;
+    if (!to.includes('@')) {
+      jid = `${to.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
+    }
+    
+    const buffer = Buffer.from(image_base64, 'base64');
+    
+    const mediaMessage = {
+      image: buffer,
+    };
+    if (caption) mediaMessage.caption = caption;
+    
+    const result = await sock.sendMessage(jid, mediaMessage);
+    console.log(`[WhatsApp] Sent image to ${to}`);
+    
+    res.json({ success: true, message_id: result.key.id, to: jid });
+  } catch (error) {
+    console.error('[WhatsApp] Failed to send image:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get('/history/:jid', (req, res) => {
   const jid = req.params.jid;
   const history = messageHistory.get(jid) || [];

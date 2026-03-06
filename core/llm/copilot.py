@@ -29,9 +29,12 @@ class CopilotClient:
     def __init__(
         self,
         token: str | None = None,
-        model: str = "claude-sonnet-4.5",
+        model: str | None = None,
         timeout: float = 120.0,
     ):
+        if model is None:
+            raise ValueError("model is required and must be provided from config")
+
         self.github_token = (
             token or self._load_saved_token() or os.environ.get("GITHUB_OAUTH_TOKEN")
         )

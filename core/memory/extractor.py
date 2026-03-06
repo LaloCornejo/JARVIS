@@ -34,9 +34,12 @@ class FactExtractor:
     def __init__(
         self,
         ollama_url: str = "http://localhost:11434",
-        model: str = "huihui_ai/qwen3.5-abliterated:2b",
+        model: str | None = None,
         vector_memory: VectorMemory | None = None,
     ):
+        if model is None:
+            raise ValueError("model is required and must be provided from config")
+
         self.ollama_url = ollama_url.rstrip("/")
         self.model = model
         self.memory = vector_memory or get_vector_memory()
@@ -166,8 +169,11 @@ _extractor: FactExtractor | None = None
 
 def get_fact_extractor(
     ollama_url: str = "http://localhost:11434",
-    model: str = "huihui_ai/qwen3.5-abliterated:2b",
+    model: str | None = None,
 ) -> FactExtractor:
+    if model is None:
+        raise ValueError("model is required and must be provided from config")
+
     global _extractor
     if _extractor is None:
         _extractor = FactExtractor(ollama_url=ollama_url, model=model)

@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 
 from agents.base import AgentContext, AgentRole, BaseAgent
 from core.llm import OllamaClient
+from core.config import Config
 from core.prediction.anomaly_detector import AnomalyDetector, get_anomaly_detector
 from core.prediction.pattern_analyzer import PatternAnalyzer, get_pattern_analyzer
 from core.prediction.suggestion_engine import SuggestionContext, get_suggestion_engine
@@ -51,7 +52,13 @@ Respond with structured action plans in JSON format."""
 
     def __init__(self, llm_client: Optional[OllamaClient] = None):
         super().__init__()
-        self.llm = llm_client or OllamaClient()
+        if llm_client is None:
+            config = Config()
+            model = config.get("ollama.primary_model")
+            if not model:
+                raise ValueError("ollama.primary_model must be configured in settings.yaml")
+            llm_client = OllamaClient(model=model, base_url=config.get("ollama.api_url"))
+        self.llm = llm_client
         self.tool_registry = get_tool_registry()
         self.pattern_analyzer: Optional[PatternAnalyzer] = None
         self.anomaly_detector: Optional[AnomalyDetector] = None

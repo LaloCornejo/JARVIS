@@ -152,12 +152,19 @@ class ModelRouter:
         ollama_client: OllamaClient,
         copilot_client: CopilotClient | None = None,
         gemini_client: GeminiClient | None = None,
-        ollama_model: str = "huihui_ai/qwen3.5-abliterated:2b",
-        copilot_model: str = "claude-sonnet-4.5",
-        gemini_model: str = "gemini-2.5-flash",
+        ollama_model: str | None = None,
+        copilot_model: str | None = None,
+        gemini_model: str | None = None,
         primary_backend: Literal["ollama", "gemini"] = "ollama",
         use_copilot_for_complex: bool = True,
     ):
+        if ollama_model is None:
+            raise ValueError("ollama_model is required and must be provided from config")
+        if copilot_model is None:
+            raise ValueError("copilot_model is required and must be provided from config")
+        if gemini_model is None:
+            raise ValueError("gemini_model is required and must be provided from config")
+
         self.ollama_client = ollama_client
         self.copilot_client = copilot_client
         self.gemini_client = gemini_client
@@ -167,11 +174,15 @@ class ModelRouter:
         self.primary_backend = primary_backend
         self.use_copilot_for_complex = use_copilot_for_complex and copilot_client is not None
 
-    def select_model(self, text: str, has_image: bool = False) -> ModelSelection:
+    def select_model(
+        self, text: str, has_image: bool = False, vision_model: str | None = None
+    ) -> ModelSelection:
         if has_image:
             if self.gemini_client:
                 return ModelSelection(backend="gemini", model=self.gemini_model)
-            return ModelSelection(backend="ollama", model="huihui_ai/qwen3-vl-abliterated:4b")
+            if vision_model:
+                return ModelSelection(backend="ollama", model=vision_model)
+            return ModelSelection(backend="ollama", model=self.ollama_model)
 
         complexity = classify_query(text)
 

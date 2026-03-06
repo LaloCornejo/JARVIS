@@ -20,10 +20,13 @@ class OllamaClient:
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "huihui_ai/qwen3.5-abliterated:2b",
+        model: str | None = None,
         timeout: float = 300.0,
         num_ctx: int | None = None,
     ):
+        if model is None:
+            raise ValueError("model is required and must be provided from config")
+
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
@@ -78,9 +81,7 @@ class OllamaClient:
         num_predict: int | None = None,
     ) -> AsyncIterator[str]:
         client = await self._get_client()
-        log.info(
-            f"Sending {'vision' if images else 'text'} generation request to Ollama"
-        )
+        log.info(f"Sending {'vision' if images else 'text'} generation request to Ollama")
         actual_prompt = prompt
         if self._should_disable_thinking():
             actual_prompt = f"/no_think\n{prompt}"
