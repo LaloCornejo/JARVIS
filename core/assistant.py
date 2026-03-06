@@ -30,6 +30,7 @@ from core.prediction.suggestion_engine import SmartSuggestionEngine
 from core.proactive import ProactiveMonitor
 from core.reasoning import get_planner, get_reasoner
 from core.security.permissions import PermissionManager
+from core.smart_context import get_smart_context, get_context_manager
 from core.threading_manager import StreamManager, TaskCoordinator, ThreadingManager
 from core.voice.stt import SpeechToText
 from core.voice.tts import TextToSpeech
@@ -76,7 +77,7 @@ class VoiceAssistant:
         log.debug("Initializing OllamaClient: %s", self.config.llm_url)
         self.ollama = OllamaClient(
             base_url=self.config.llm_url,
-            model=self.config.get("llm.primary_model", "qwen3.5:2b"),
+            model=self.config.get("llm.primary_model", "huihui_ai/qwen3.5-abliterated:2b"),
         )
         self._preload_ollama = self.config.get("ollama.preload", False)
 
@@ -87,7 +88,7 @@ class VoiceAssistant:
         primary_backend = self.config.get("llm.backend", "ollama")
         self.router = ModelRouter(
             ollama_client=self.ollama,
-            ollama_model=self.config.get("llm.primary_model", "qwen3.5:2b"),
+            ollama_model=self.config.get("llm.primary_model", "huihui_ai/qwen3.5-abliterated:2b"),
             primary_backend=primary_backend,
         )
         self.llm = self.ollama
@@ -461,14 +462,19 @@ class VoiceAssistant:
 
         try:
             log.info("Starting LLM chat with backend: %s", backend)
-            # Always use Ollama since we removed Copilot and Gemini
             client = self.ollama
             client.model = model
 
-            # Get recent messages from shared buffer for context
-            recent_messages = await self._conversation_buffer.get_recent_messages(
-                self._max_messages
+            context_decision = await get_smart_context(text, role="user")
+            recent_messages = context_decision.messages_to_include
+            log.info(
+                f"Smart context: {context_decision.reasoning}, messages={len(recent_messages)}"
             )
+
+            if context_decision.semantic_memories:
+                system_prompt += "\n\nRelevant past context:"
+                for mem in context_decision.semantic_memories:
+                    system_prompt += f"\n- {mem['text'][:100]}"
 
             async for chunk in client.chat(
                 messages=recent_messages,
@@ -513,15 +519,11 @@ class VoiceAssistant:
 
             if not is_vision_tool:
                 log.info("Starting second LLM pass to summarize tool results")
-                # RL-style retry: keep trying until we get a proper answer
                 max_attempts = 3
                 for attempt in range(max_attempts):
                     full_response = ""
-                    # Get recent messages from shared buffer for context
-                    recent_messages = await self._conversation_buffer.get_recent_messages(
-                        self._max_messages
-                    )
-                    # Add retry instruction if this isn't the first attempt
+                    context_decision = await get_smart_context(text, role="user")
+                    recent_messages = context_decision.messages_to_include
                     attempt_prompt = system_prompt
                     if attempt > 0:
                         attempt_prompt += "\n\nIMPORTANT: You have tool results above. DO NOT make more tool calls. "
@@ -587,15 +589,11 @@ class VoiceAssistant:
             tool_results = await self._process_tool_calls(tool_calls)
             for result in tool_results:
                 await self._conversation_buffer.add_message(result)
-            # Generate final response with RL-style retry
             max_attempts = 3
             for attempt in range(max_attempts):
                 full_response = ""
-                # Get recent messages from shared buffer for context
-                recent_messages = await self._conversation_buffer.get_recent_messages(
-                    self._max_messages
-                )
-                # Add retry instruction if needed
+                context_decision = await get_smart_context(text, role="user")
+                recent_messages = context_decision.messages_to_include
                 attempt_prompt = system_prompt
                 if attempt > 0:
                     attempt_prompt += (
@@ -632,6 +630,13 @@ class VoiceAssistant:
                 break
 
         await self._conversation_buffer.add_message({"role": "assistant", "content": full_response})
+
+        try:
+            ctx_manager = get_context_manager()
+            await ctx_manager.add_to_memory("user", text)
+            await ctx_manager.add_to_memory("assistant", full_response)
+        except Exception as e:
+            log.debug(f"Failed to store in semantic memory: {e}")
 
         log.debug(
             "Response: %s",

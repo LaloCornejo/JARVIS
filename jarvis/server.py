@@ -11,6 +11,7 @@ from core.cache import intent_cache, should_cache_response
 from core.config import Config
 from core.llm.optimized_client import OptimizedLLMClient
 from core.performance_monitor import performance_monitor
+from core.smart_context import get_smart_context, get_context_manager
 from core.streaming_interface import conversation_buffer, streaming_interface
 from core.voice.tts import TextToSpeech
 from tools import get_tool_registry
@@ -30,14 +31,81 @@ as long as they're contextually appropriate.
 You may freely express opinions, make blunt assumptions, or use strong, real language — even
 swear — without self-censorship.
 Be friendly, but don't be afraid to be raw, real, and unfiltered.
-JARVIS doesn't hold back — and neither should you."""
+JARVIS doesn't hold back — and neither should you.
+
+CRITICAL: When processing ANY query, you MUST use <thinking> tags.
+
+Format your response like this:
+<thinking>
+Your thinking/reasoning process goes here. Think through the user's request, what they need, and how to respond.
+</thinking>
+Your actual response to the user goes here. This part only - no thinking tags.
+
+The thinking tags will be shown to the user separately. Your final response must NOT contain the thinking content."""
+
+
+class ThinkingFilter:
+    def __init__(self, broadcast_func):
+        self._broadcast = broadcast_func
+        self._thinking_buf = ""
+        self._response_buf = ""
+        self._in_thinking = False
+        self._thinking_done = False
+
+    async def __call__(self, message: dict) -> None:
+        if message.get("type") != "streaming_chunk":
+            await self._broadcast(message)
+            return
+
+        raw = message.get("content") or ""
+        if not raw:
+            return
+
+        remaining = raw
+        while remaining:
+            if self._in_thinking:
+                end = remaining.find("</thinking>")
+                if end == -1:
+                    self._thinking_buf += remaining
+                    await self._broadcast({"type": "thinking_chunk", "content": remaining})
+                    remaining = ""
+                else:
+                    chunk = remaining[:end]
+                    self._thinking_buf += chunk
+                    if chunk:
+                        await self._broadcast({"type": "thinking_chunk", "content": chunk})
+                    self._in_thinking = False
+                    self._thinking_done = True
+                    remaining = remaining[end + len("</thinking>") :]
+            else:
+                start = remaining.find("<thinking>")
+                if start == -1:
+                    self._response_buf += remaining
+                    await self._broadcast({"type": "streaming_chunk", "content": remaining})
+                    remaining = ""
+                else:
+                    before = remaining[:start]
+                    if before:
+                        self._response_buf += before
+                        await self._broadcast({"type": "streaming_chunk", "content": before})
+                    self._in_thinking = True
+                    remaining = remaining[start + len("<thinking>") :]
+
+    async def flush(self, full_response: str) -> tuple[str, str]:
+        thinking = re.sub(r"\s+", " ", self._thinking_buf).strip()
+        if thinking:
+            await self._broadcast({"type": "thinking_complete", "content": thinking})
+        clean = re.sub(
+            r"<thinking>.*?</thinking>", "", full_response, flags=re.DOTALL | re.IGNORECASE
+        ).strip()
+        return clean, thinking
 
 
 class JarvisServer:
     def __init__(self):
         self.config = Config("config/settings.yaml")
-        # Determine which config section to use based on backend
         backend = self.config.get("llm.backend", "nvidia")
+        log.warning(f"[SERVER] LLM backend from config: {backend}")
         if backend == "nvidia":
             model = self.config.get("nvidia.default_model", "moonshotai/kimi-k2.5")
             base_url = self.config.get("nvidia.api_url", "https://integrate.api.nvidia.com/v1")
@@ -47,6 +115,7 @@ class JarvisServer:
             base_url = self.config.llm_url
             api_key_env = self.config.get("nvidia.api_key_env", "NVIDIA_API_KEY")
 
+        log.warning(f"[SERVER] LLM model: {model}, base_url: {base_url}")
         self.ollama = OptimizedLLMClient(
             backend=backend,
             base_url=base_url,
@@ -74,14 +143,38 @@ class JarvisServer:
                 return model_selection
 
     async def process_message(self, user_input: str, broadcast_func=None) -> None:
-        """Process a user message and handle LLM interaction, tools, and responses"""
         log.warning(f"[SERVER] Processing message: {len(user_input)} chars")
 
-        # Add user message to conversation
         self.messages.append({"role": "user", "content": user_input})
         await conversation_buffer.add_message({"role": "user", "content": user_input})
 
-        # Send user message to all clients
+        context_decision = await get_smart_context(user_input, role="user")
+        smart_messages = context_decision.messages_to_include
+        log.warning(
+            f"[SERVER] Smart context: {context_decision.reasoning}, messages={len(smart_messages)}"
+        )
+
+        messages_for_llm = [{"role": "user", "content": user_input}]
+        messages_for_llm.extend(smart_messages)
+
+        extra_system_prompt = ""
+        if context_decision.semantic_memories:
+            extra_system_prompt += "\n\nRelevant past context:"
+            for mem in context_decision.semantic_memories:
+                extra_system_prompt += f"\n- {mem['text'][:100]}"
+
+        thinking_text = ""
+
+        async def filtered_broadcast(message: dict):
+            if broadcast_func:
+                await broadcast_func(message)
+
+        async def broadcast_thinking_chunk(content: str):
+            nonlocal thinking_text
+            thinking_text += content
+            if broadcast_func:
+                await broadcast_func({"type": "thinking_chunk", "content": content})
+
         if broadcast_func:
             await broadcast_func({"type": "user_message", "content": user_input})
 
@@ -102,10 +195,16 @@ class JarvisServer:
             await streaming_interface.push_assistant_message(cached_response)
             await conversation_buffer.add_message({"role": "assistant", "content": cached_response})
             if broadcast_func:
+                clean_cached = re.sub(
+                    r"<thinking>.*?</thinking>",
+                    "",
+                    cached_response,
+                    flags=re.DOTALL | re.IGNORECASE,
+                ).strip()
                 await broadcast_func(
                     {
                         "type": "assistant_message",
-                        "content": cached_response,
+                        "content": clean_cached,
                         "cached": True,
                     }
                 )
@@ -117,36 +216,41 @@ class JarvisServer:
         tool_calls = []
         schemas = self.tools.get_filtered_schemas(user_input)
 
+        tool_names = [s.get("function", {}).get("name", "unknown") for s in schemas]
+        log.warning(f"[SERVER] Got {len(schemas)} tool schemas: {tool_names[:10]}")
+
         log.warning(f"[SERVER] Starting chat stream with {type(client).__name__}")
         start_time = asyncio.get_event_loop().time()
         chunk_count = 0
 
-        async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT, tools=schemas):
+        full_system_prompt = SYSTEM_PROMPT + extra_system_prompt
+        async for chunk in client.chat(
+            messages=messages_for_llm, system=full_system_prompt, tools=schemas
+        ):
             chunk_count += 1
             if msg := chunk.get("message", {}):
                 if content := msg.get("content"):
                     log.warning(f"[SERVER] Got content chunk {chunk_count}: {len(content)} chars")
                     full_response += content
-                    if broadcast_func:
-                        await broadcast_func({"type": "streaming_chunk", "content": content})
+                    await filtered_broadcast({"type": "streaming_chunk", "content": content})
             if calls := msg.get("tool_calls"):
                 log.warning(
                     f"[SERVER] Found {len(calls)} tool calls in message chunk {chunk_count}"
                 )
                 self._accumulate_tool_calls(calls, tool_calls, chunk_count)
-            # Handle tool_calls directly from optimized_client (type: "tool_calls")
+            elif chunk.get("type") == "thinking":
+                if thinking_content := chunk.get("content"):
+                    await broadcast_thinking_chunk(thinking_content)
             elif chunk.get("type") == "tool_calls" and chunk.get("tool_calls"):
                 calls = chunk["tool_calls"]
                 log.warning(f"[SERVER] Found {len(calls)} tool calls in SSE chunk {chunk_count}")
                 self._accumulate_tool_calls(calls, tool_calls, chunk_count, source="sse")
-            # Handle direct content chunks (not wrapped in message)
             elif content := chunk.get("content"):
                 log.warning(
                     f"[SERVER] Got direct content chunk {chunk_count}: {len(content)} chars"
                 )
                 full_response += content
-                if broadcast_func:
-                    await broadcast_func({"type": "streaming_chunk", "content": content})
+                await filtered_broadcast({"type": "streaming_chunk", "content": content})
 
         log.warning(
             f"[SERVER] Chat stream ended after {chunk_count} chunks, "
@@ -162,8 +266,6 @@ class JarvisServer:
                 log.warning(f"[SERVER] Extracted {len(xml_calls)} XML function calls from content")
                 tool_calls = xml_calls
                 # Remove XML from content to clean up response
-                import re
-
                 full_response = re.sub(
                     r"<function_calls>.*?</function_calls>",
                     "",
@@ -180,8 +282,6 @@ class JarvisServer:
                     )
                     tool_calls = nvidia_calls
                     # Remove NVIDIA tool call section from content
-                    import re
-
                     full_response = re.sub(
                         r"<\|tool_calls_section_begin\|>.*?<\|tool_calls_section_end\|>",
                         "",
@@ -204,9 +304,8 @@ class JarvisServer:
             def try_fix_and_validate(call):
                 fn = call.get("function", {})
                 args = fn.get("arguments") or ""
-                # Empty string is valid (will become {})
                 if args == "":
-                    call["function"]["arguments"] = "{}"
+                    call["function"]["arguments"] = {}
                     return True
                 if isinstance(args, dict):
                     return True  # Already parsed
@@ -331,10 +430,15 @@ class JarvisServer:
                     is_vision_tool = False
 
             if not is_vision_tool:
-                log.warning(f"[SERVER] Starting second LLM pass with {len(self.messages)} messages")
+                log.warning(f"[SERVER] Starting second LLM pass with smart context")
+                context_decision_2 = await get_smart_context(user_input, role="user")
+                second_pass_base = context_decision_2.messages_to_include
+                second_pass_messages = [{"role": "user", "content": user_input}] + second_pass_base
                 full_response = ""
                 second_pass_chunks = 0
-                async for chunk in client.chat(messages=self.messages, system=SYSTEM_PROMPT):
+                async for chunk in client.chat(
+                    messages=second_pass_messages, system=full_system_prompt
+                ):
                     second_pass_chunks += 1
                     if msg := chunk.get("message", {}):
                         if content := msg.get("content"):
@@ -343,23 +447,23 @@ class JarvisServer:
                                 f"{len(content)} chars"
                             )
                             full_response += content
-                            if broadcast_func:
-                                await broadcast_func(
-                                    {"type": "streaming_chunk", "content": content}
-                                )
+                            await filtered_broadcast(
+                                {"type": "streaming_chunk", "content": content}
+                            )
                         elif calls := msg.get("tool_calls"):
                             log.warning(
                                 f"[SERVER] Unexpected tool calls in second pass: {len(calls)}"
                             )
+                    elif chunk.get("type") == "thinking":
+                        if thinking_content := chunk.get("content"):
+                            await broadcast_thinking_chunk(thinking_content)
                     elif content := chunk.get("content"):
-                        # Handle direct content chunks (not wrapped in message)
                         log.info(
                             f"[SERVER] Second pass direct chunk {second_pass_chunks}: "
                             f"{len(content)} chars"
                         )
                         full_response += content
-                        if broadcast_func:
-                            await broadcast_func({"type": "streaming_chunk", "content": content})
+                        await filtered_broadcast({"type": "streaming_chunk", "content": content})
                     elif tool_result := chunk.get("tool_calls"):
                         log.warning(f"[SERVER] Tool result in chunk: {tool_result}")
 
@@ -414,6 +518,9 @@ class JarvisServer:
                                 log.warning(
                                     f"[SERVER] Unexpected tool calls in pass {current_pass}: {len(calls)}"
                                 )
+                        elif chunk.get("type") == "thinking":
+                            if thinking_content := chunk.get("content"):
+                                await broadcast_thinking_chunk(thinking_content)
                         elif chunk.get("content"):
                             content = chunk.get("content")
                         elif chunk.get("tool_calls"):
@@ -466,9 +573,8 @@ class JarvisServer:
                                     # Still inside tool call, don't send to user yet
                                     continue
 
-                    # Normal content - send to user (but not tool call content)
-                    if broadcast_func and not in_tool_call:
-                        await broadcast_func({"type": "streaming_chunk", "content": content})
+                    if not in_tool_call:
+                        await filtered_broadcast({"type": "streaming_chunk", "content": content})
 
                     # If we ended while still in a tool call (incomplete), try to parse anyway
                     if in_tool_call and tool_call_buffer:
@@ -513,21 +619,32 @@ class JarvisServer:
                             f"[SERVER] Pass {current_pass} completed with empty response, continuing to next pass"
                         )
 
-        # Only append non-empty responses to maintain conversation flow
-        if full_response.strip():
-            self.messages.append({"role": "assistant", "content": full_response})
-            await streaming_interface.push_assistant_message(full_response)
-            await conversation_buffer.add_message({"role": "assistant", "content": full_response})
+        if thinking_text and broadcast_func:
+            await broadcast_func({"type": "thinking_complete", "content": thinking_text})
+
+        clean_response = re.sub(
+            r"<thinking>.*?</thinking>", "", full_response, flags=re.DOTALL | re.IGNORECASE
+        ).strip()
+
+        if clean_response.strip():
+            self.messages.append({"role": "assistant", "content": clean_response})
+            await streaming_interface.push_assistant_message(clean_response)
+            await conversation_buffer.add_message({"role": "assistant", "content": clean_response})
+
+            try:
+                ctx_manager = get_context_manager()
+                await ctx_manager.add_to_memory("user", user_input)
+                await ctx_manager.add_to_memory("assistant", clean_response)
+            except Exception as e:
+                log.debug(f"Failed to store in semantic memory: {e}")
         else:
-            # If we have no content but had tool calls, the tool results are already in messages
             log.warning("[SERVER] Skipping empty assistant message append")
 
         if broadcast_func:
-            await broadcast_func({"type": "message_complete", "full_response": full_response})
+            await broadcast_func({"type": "message_complete", "full_response": clean_response})
 
-        # Cache response if appropriate
-        if should_cache_response(user_input, full_response):
-            await intent_cache.set(cache_key, full_response)
+        if should_cache_response(user_input, clean_response):
+            await intent_cache.set(cache_key, clean_response)
 
         if len(self.messages) > self._max_messages:
             self.messages = self.messages[-self._max_messages :]

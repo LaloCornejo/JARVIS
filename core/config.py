@@ -47,16 +47,16 @@ class Config:
 
     @property
     def llm_model(self) -> str:
-        return self._get_backend_config("primary_model", "qwen3.5:2b")
+        return self._get_backend_config("primary_model", "huihui_ai/qwen3.5-abliterated:2b")
 
     @property
     def llm_vision_model(self) -> str:
         return self._get_backend_config(
-            "vision_model", "huihui_ai/qwen3-vl-abliterated:8b-instruct"
+            "vision_model", "huihui_ai/qwen3.5-abliterated:2b"
         )
 
     def llm_fast_model(self) -> str:
-        return self._get_backend_config("fast_model", "qwen3.5:2b")
+        return self._get_backend_config("fast_model", "huihui_ai/qwen3.5-abliterated:2b")
 
     @property
     def tts_base_url(self) -> str:

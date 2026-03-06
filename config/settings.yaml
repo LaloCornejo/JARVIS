@@ -10,10 +10,10 @@ llm:
 
 ollama:
   api_url: http://localhost:11434
-  primary_model: qwen3.5:2b
-  fast_model: qwen3.5:2b
-  vision_model: huihui_ai/qwen3-vl-abliterated:8b-instruct
-  fallback_model: qwen3.5:2b
+  primary_model: huihui_ai/qwen3.5-abliterated:2b
+  fast_model: huihui_ai/qwen3.5-abliterated:2b
+  vision_model: huihui_ai/qwen3.5-abliterated:2b
+  fallback_model: huihui_ai/qwen3.5-abliterated:2b
   preload: true
 
 nvidia:

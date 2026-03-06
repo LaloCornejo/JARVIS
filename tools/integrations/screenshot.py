@@ -453,7 +453,7 @@ class ScreenshotAnalyzeTool(BaseTool):
                 return ToolResult(
                     success=False,
                     data=None,
-                    error="Ollama not available. Ensure Ollama is running with huihui_ai/qwen3-vl-abliterated:8b-instruct.",
+                    error="Ollama not available. Ensure Ollama is running with huihui_ai/qwen3.5-abliterated:2b.",
                 )
 
             # Stream response progressively for better perceived performance

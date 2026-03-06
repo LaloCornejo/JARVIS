@@ -34,7 +34,7 @@ class FactExtractor:
     def __init__(
         self,
         ollama_url: str = "http://localhost:11434",
-        model: str = "qwen3.5:2b",
+        model: str = "huihui_ai/qwen3.5-abliterated:2b",
         vector_memory: VectorMemory | None = None,
     ):
         self.ollama_url = ollama_url.rstrip("/")
@@ -166,7 +166,7 @@ _extractor: FactExtractor | None = None
 
 def get_fact_extractor(
     ollama_url: str = "http://localhost:11434",
-    model: str = "qwen3.5:2b",
+    model: str = "huihui_ai/qwen3.5-abliterated:2b",
 ) -> FactExtractor:
     global _extractor
     if _extractor is None:

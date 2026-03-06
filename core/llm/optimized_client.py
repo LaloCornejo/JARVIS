@@ -111,7 +111,14 @@ class OptimizedLLMClient:
         self._client: httpx.AsyncClient | None = None
         self._response_cache = {}
         self._context_summarizer = ContextSummarizer()
-        self._cache_max_size = 100  # Maximum cached responses
+        self._cache_max_size = 100
+        log.debug(
+            f"[{self._log_prefix}] Initialized with backend={backend}, model={model}, base_url={base_url}"
+        )
+
+    @property
+    def _log_prefix(self) -> str:
+        return self.backend.upper()
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client with optimizations"""
@@ -205,19 +212,21 @@ class OptimizedLLMClient:
             endpoint = "/api/chat"
 
         client = await self._get_client()
+        prefix = self._log_prefix
 
         try:
             # Debug: Log request data for troubleshooting
             log.debug(
-                f"[NVIDIA] Sending request to {endpoint} with {len(request_data.get('messages', []))} messages"
+                f"[{prefix}] Sending request to {endpoint} with {len(request_data.get('messages', []))} messages"
             )
             log.debug(
-                f"[NVIDIA] Request model: {request_data.get('model')}, stream: {request_data.get('stream')}"
+                f"[{prefix}] Request model: {request_data.get('model')}, stream: {request_data.get('stream')}"
             )
-            log.debug(f"[NVIDIA] Request payload: {json.dumps(request_data, indent=2)[:2000]}")
+            log.warning(f"[{prefix}] Tools in request: {len(request_data.get('tools', []))} tools")
+            log.debug(f"[{prefix}] Request payload: {json.dumps(request_data, indent=2)[:2000]}")
             for i, msg in enumerate(request_data.get("messages", [])[:3]):  # Log first 3 messages
                 log.debug(
-                    f"[NVIDIA] Message {i}: role={msg.get('role')}, content_len={len(str(msg.get('content', '')))}, has_tool_calls={bool(msg.get('tool_calls'))}"
+                    f"[{prefix}] Message {i}: role={msg.get('role')}, content_len={len(str(msg.get('content', '')))}, has_tool_calls={bool(msg.get('tool_calls'))}"
                 )
 
             async with client.stream(
@@ -230,8 +239,11 @@ class OptimizedLLMClient:
                 if response.status_code >= 400:
                     error_body = await response.aread()
                     error_text = error_body.decode("utf-8", errors="replace")[:2000]
-                    log.error(f"[NVIDIA] HTTP {response.status_code} error: {error_text}")
-                    log.error(f"[NVIDIA] Response headers: {dict(response.headers)}")
+                    log.error(f"[{prefix}] HTTP {response.status_code} error: {error_text}")
+                    log.error(f"[{prefix}] Response headers: {dict(response.headers)}")
+                    log.error(
+                        f"[{prefix}] Failed request - model: {request_data.get('model')}, messages: {len(request_data.get('messages', []))}, tools: {len(request_data.get('tools', []))}"
+                    )
                     yield {
                         "type": "error",
                         "error": f"HTTP {response.status_code}: {error_text}",
@@ -363,10 +375,20 @@ class OptimizedLLMClient:
                                 message = data["message"]
 
                                 content = message.get("content", "")
-                                thinking = message.get("thinking", "")
+                                thinking = message.get("thinking", "") or message.get(
+                                    "reasoning_content", ""
+                                )
 
                                 if thinking:
-                                    content = thinking + content
+                                    log.debug(
+                                        f"[OLLAMA] Found thinking/reasoning: {len(thinking)} chars"
+                                    )
+                                    yield {
+                                        "type": "thinking",
+                                        "content": thinking,
+                                        "partial": True,
+                                        "timestamp": asyncio.get_event_loop().time(),
+                                    }
 
                                 if content:
                                     buffer += content
@@ -511,9 +533,11 @@ class OptimizedLLMClient:
 
         log.debug(f"[NVIDIA] Using model: {model_to_use}")
 
+        validated_messages = self._validate_messages(nvidia_messages)
+
         request_data = {
             "model": model_to_use,
-            "messages": nvidia_messages,
+            "messages": validated_messages,
             "stream": True,
             "temperature": 0.7,
             "top_p": 0.9,
@@ -523,15 +547,30 @@ class OptimizedLLMClient:
         if tools:
             request_data["tools"] = tools
 
+        try:
+            test_json = json.dumps(request_data)
+            log.debug(f"[NVIDIA] Request payload validation: OK ({len(test_json)} bytes)")
+        except Exception as e:
+            log.error(f"[NVIDIA] Request payload validation FAILED: {e}")
+            for key, value in request_data.items():
+                try:
+                    json.dumps(value)
+                except Exception as field_error:
+                    log.error(
+                        f"[NVIDIA] Problematic field '{key}': {field_error} - value type: {type(value)}"
+                    )
+
         return request_data
 
     def _prepare_ollama_request(
         self, messages: list, system: str, tools: list, context_window: int
     ) -> dict:
         """Prepare request for Ollama API"""
+        validated_messages = self._validate_messages(messages)
+
         request_data = {
             "model": self.model,
-            "messages": messages,
+            "messages": validated_messages,
             "stream": True,
             "options": {
                 "temperature": 0.7,
@@ -545,12 +584,62 @@ class OptimizedLLMClient:
             },
         }
 
+        if "qwen" in self.model.lower() and "3" in self.model:
+            request_data["options"]["thinking"] = {"type": "enabled"}
+
         if system:
             request_data["system"] = system
         if tools:
             request_data["tools"] = tools
 
         return request_data
+
+    def _validate_messages(self, messages: list) -> list:
+        """Validate and fix messages to ensure they're valid JSON"""
+        validated = []
+        for msg in messages:
+            validated_msg = dict(msg)
+            role = msg.get("role", "")
+
+            if role == "assistant" and "tool_calls" in msg:
+                tool_calls = msg["tool_calls"]
+                if isinstance(tool_calls, list):
+                    fixed_calls = []
+                    for tc in tool_calls:
+                        if isinstance(tc, dict):
+                            fn = tc.get("function", {})
+                            args = fn.get("arguments")
+
+                            if isinstance(args, str):
+                                try:
+                                    json.loads(args)
+                                except json.JSONDecodeError:
+                                    brace_count = args.count("{") - args.count("}")
+                                    if brace_count > 0:
+                                        args = args + ("}" * brace_count)
+                                    elif brace_count < 0:
+                                        args = args[: args.rfind("}") + 1] if "}" in args else args
+
+                                    try:
+                                        json.loads(args)
+                                        tc["function"]["arguments"] = args
+                                        log.debug(f"[OLLAMA] Fixed tool call args: {args[:50]}...")
+                                    except json.JSONDecodeError:
+                                        tc["function"]["arguments"] = "{}"
+                                        log.warning(
+                                            f"[OLLAMA] Resetting invalid tool call args to {{}}"
+                                        )
+                            fixed_calls.append(tc)
+                    validated_msg["tool_calls"] = fixed_calls
+
+            elif role == "tool":
+                content = msg.get("content", "")
+                if not isinstance(content, str):
+                    validated_msg["content"] = json.dumps(content)
+
+            validated.append(validated_msg)
+
+        return validated
 
     def _parse_nvidia_response(self, data: dict) -> dict:
         """Parse NVIDIA API response"""

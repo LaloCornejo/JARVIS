@@ -103,9 +103,10 @@ connected_clients: Set[WebSocket] = set()
 async def broadcast(message: dict):
     """Broadcast a message to all connected WebSocket clients"""
     print(f"Broadcasting {message.get('type', 'unknown')} to {len(connected_clients)} clients")
-    log.warning(
-        f"[WEBSOCKET] Broadcasting {message.get('type', 'unknown')} to {len(connected_clients)} clients"
-    )
+    if len(connected_clients) > 0:
+        log.info(
+            f"[WEBSOCKET] Broadcasting {message.get('type', 'unknown')} to {len(connected_clients)} clients"
+        )
     for client in connected_clients.copy():  # Copy to avoid modification during iteration
         try:
             await client.send_json(message)

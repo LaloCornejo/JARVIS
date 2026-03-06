@@ -1,0 +1,3 @@
+@echo off
+echo Starting JARVIS with auto-restart on file changes...
+python watch_restart.py --dir "%~dp0."

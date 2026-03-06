@@ -10,8 +10,8 @@ import httpx
 log = logging.getLogger("jarvis.ollama")
 
 MODEL_CONTEXT_WINDOWS = {
-    "qwen3.5:2b": 32768,
-    "huihui_ai/qwen3-vl-abliterated:8b-instruct": 32768,
+    "huihui_ai/qwen3.5-abliterated:2b": 32768,
+    "huihui_ai/qwen3.5-abliterated:2b": 32768,
 }
 DEFAULT_NUM_CTX = 16384
 
@@ -20,7 +20,7 @@ class OllamaClient:
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "qwen3.5:2b",
+        model: str = "huihui_ai/qwen3.5-abliterated:2b",
         timeout: float = 300.0,
         num_ctx: int | None = None,
     ):

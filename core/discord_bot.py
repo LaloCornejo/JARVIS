@@ -89,6 +89,7 @@ class DiscordSession:
     max_messages: int = 25
     voice_client: Any | None = None
     voice_sink: Any | None = None
+    thinking_enabled: bool = True
 
     def add_message(self, role: str, content: str, **kwargs) -> None:
         """Add a message to the conversation history."""
@@ -188,6 +189,7 @@ class DiscordBotHandler:
             "!leave": self._handle_leave_voice,
             "!listen": self._handle_listen_voice,
             "!test-voice": self._handle_test_voice,
+            "!thinking": self._handle_thinking,
         }
 
     async def start(self, jarvis_server: "JarvisServer | None" = None) -> bool:
@@ -285,8 +287,23 @@ class DiscordBotHandler:
     async def _cleanup_voice_resources(self) -> None:
         if self._voice_player:
             try:
-                for guild_id in list(self._voice_player._connections.keys()):
-                    await self._voice_player.disconnect_from_voice(guild_id)
+                # Handle both voice_connections and legacy _connections attribute
+                connections_attr = None
+                if hasattr(self._voice_player, "voice_connections"):
+                    connections_attr = "voice_connections"
+                elif hasattr(self._voice_player, "_connections"):
+                    connections_attr = "_connections"
+
+                if connections_attr:
+                    connections = getattr(self._voice_player, connections_attr, {})
+                    if isinstance(connections, dict):
+                        for guild_id in list(connections.keys()):
+                            try:
+                                await self._voice_player.disconnect_from_voice(guild_id)
+                            except Exception as e:
+                                log.debug(f"[DISCORD] Error disconnecting guild {guild_id}: {e}")
+            except AttributeError as e:
+                log.debug(f"[DISCORD] Voice player attribute error during cleanup: {e}")
             except Exception as e:
                 log.warning(f"[DISCORD] Error disconnecting voice player: {e}")
             self._voice_player = None
@@ -688,24 +705,37 @@ class DiscordBotHandler:
 
         try:
             full_response = ""
+            thinking_text = None
             response_chunks = []
 
             async def capture_broadcast(message: dict) -> None:
                 try:
-                    nonlocal full_response
+                    nonlocal full_response, thinking_text
                     message_type = message.get("type")
                     log.debug(f"[DISCORD] Received broadcast message: {message_type}")
                     if message_type == "streaming_chunk":
-                        content = message.get("content", "")
-                        log.debug(f"[DISCORD] Received streaming chunk: {len(content)} chars")
-                        response_chunks.append(content)
+                        content = message.get("content") or ""
+                        if content:
+                            log.debug(f"[DISCORD] Received streaming chunk: {len(content)} chars")
+                            response_chunks.append(content)
+                    elif message_type == "thinking_complete":
+                        thinking_text = message.get("content", "")
+                        log.debug(f"[DISCORD] Received thinking: {len(thinking_text)} chars")
                     elif message_type == "message_complete":
                         full_response = message.get("full_response", "")
                         log.debug(
                             f"[DISCORD] Received message complete: {len(full_response)} chars"
                         )
-                    else:
-                        log.debug(f"[DISCORD] Received unknown message type: {message_type}")
+                    elif message_type == "user_message":
+                        log.debug(
+                            f"[DISCORD] Received user message echo (from WebSocket broadcast)"
+                        )
+                    elif message_type == "assistant_message":
+                        log.debug(f"[DISCORD] Received assistant message echo")
+                    elif message_type == "thinking_chunk":
+                        log.debug(f"[DISCORD] Received thinking chunk")
+                    elif message_type:
+                        log.debug(f"[DISCORD] Received unhandled message type: {message_type}")
 
                     try:
                         await _broadcast_to_websockets(message)
@@ -728,7 +758,20 @@ class DiscordBotHandler:
                 )
             if full_response:
                 log.info(f"[DISCORD] Got response from JARVIS: {len(full_response)} chars")
-                session.add_message("assistant", full_response)
+
+                import re
+
+                full_response_clean = full_response.replace("\\n", "\n")
+                full_response_clean = re.sub(r"\n{3,}", "\n\n", full_response_clean).strip()
+
+                if thinking_text and session.thinking_enabled:
+                    thinking_text = thinking_text.replace("\\n", "\n")
+                    thinking_text = re.sub(r"\n{3,}", "\n\n", thinking_text).strip()
+                    thinking_quoted = "\n".join(f"> {line}" for line in thinking_text.splitlines())
+                    await self._send_message(channel_id, f"-# Thinking... #-\n{thinking_quoted}")
+
+                session.add_message("assistant", full_response_clean.replace("\n\n", ""))
+                full_response = full_response_clean
                 tts_available = False
                 if hasattr(self.jarvis, "tts") and self.jarvis.tts:
                     try:
@@ -778,6 +821,7 @@ class DiscordBotHandler:
                             )
                 else:
                     await self._send_long_message(channel_id, full_response, reply_to=message_id)
+
             else:
                 log.warning("[DISCORD] No response from JARVIS")
                 await self._send_message(
@@ -815,6 +859,33 @@ class DiscordBotHandler:
         except Exception as e:
             log.error(f"[DISCORD] Error sending message: {e}")
             return None
+
+    async def _delete_message(self, channel_id: str, message_id: str) -> bool:
+        """Delete a message from Discord."""
+        if not self._http_client:
+            return False
+        try:
+            response = await self._http_client.delete(
+                f"{self.API_URL}/channels/{channel_id}/messages/{message_id}"
+            )
+            if response.status_code in (200, 204):
+                log.debug(f"[DISCORD] Deleted message {message_id}")
+                return True
+            else:
+                log.warning(f"[DISCORD] Failed to delete message: {response.status_code}")
+                return False
+        except Exception as e:
+            log.error(f"[DISCORD] Error deleting message: {e}")
+            return False
+
+    async def _send_thinking_embed(
+        self,
+        channel_id: str,
+        thinking: str,
+    ) -> dict | None:
+        """Send thinking as italic text."""
+        thinking_formatted = f"_{thinking}_"
+        return await self._send_message(channel_id, thinking_formatted)
 
     async def _send_audio_message(
         self,
@@ -985,6 +1056,7 @@ And much more!
 `!jarvis` or `!help` - Show this help
 `!status` - Check bot status
 `!clear` - Clear conversation history
+`!thinking` - Toggle thinking display (shows AI reasoning)
 `!join [channel_id]` - Join a voice channel (requires channel ID - right-click channel - Copy ID)
 `!leave` - Leave current voice channel
 `!listen` - Listen to voice channel (voice commands)
@@ -1005,6 +1077,7 @@ Active Sessions: {stats.get("active_sessions", 0)}
 Channel: {session.channel_id}
 User: {session.username or "Unknown"}
 Messages: {len(session.messages)}
+Thinking: {"Enabled" if session.thinking_enabled else "Disabled"}
 Last Activity: {session.last_activity.strftime("%H:%M:%S")}"""
         await self._send_message(session.channel_id, status_text)
 
@@ -1138,6 +1211,34 @@ STT: {self._stt is not None}"""
             await self._send_message(session.channel_id, response)
         except Exception as e:
             await self._send_message(session.channel_id, f"Voice test failed: {e}")
+
+    async def _handle_thinking(
+        self, session: DiscordSession, message_data: dict, text: str
+    ) -> None:
+        """Handle thinking toggle command."""
+        parts = text.split()
+        if len(parts) > 1:
+            arg = parts[1].lower()
+            if arg in ("on", "enable", "true", "1", "yes"):
+                session.thinking_enabled = True
+                status = "enabled"
+            elif arg in ("off", "disable", "false", "0", "no"):
+                session.thinking_enabled = False
+                status = "disabled"
+            else:
+                await self._send_message(
+                    session.channel_id,
+                    f"Usage: `!thinking` (toggle) or `!thinking on` / `!thinking off`",
+                )
+                return
+        else:
+            session.thinking_enabled = not session.thinking_enabled
+            status = "enabled" if session.thinking_enabled else "disabled"
+
+        await self._send_message(
+            session.channel_id,
+            f"Thinking display {status} for this channel.",
+        )
 
 
 discord_bot_handler = DiscordBotHandler()
