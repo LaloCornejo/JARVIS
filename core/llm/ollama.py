@@ -1,0 +1,268 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from typing import Any, AsyncIterator
+
+import httpx
+
+log = logging.getLogger("jarvis.ollama")
+
+MODEL_CONTEXT_WINDOWS = {
+    "huihui_ai/qwen3.5-abliterated:2b": 262144,
+    "qwen3:1.7b": 40960,
+}
+DEFAULT_NUM_CTX = 40960
+
+
+class OllamaClient:
+    def __init__(
+        self,
+        base_url: str = "http://localhost:11434",
+        model: str | None = None,
+        timeout: float = 300.0,
+        num_ctx: int | None = None,
+    ):
+        if model is None:
+            raise ValueError("model is required and must be provided from config")
+
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.timeout = timeout
+        self.num_ctx = num_ctx or self._get_context_window(model)
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_context_window(self, model: str) -> int:
+        for name, ctx in MODEL_CONTEXT_WINDOWS.items():
+            if name in model.lower():
+                return ctx
+        return DEFAULT_NUM_CTX
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.timeout)
+        return self._client
+
+    async def close(self) -> None:
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+    async def preload_model(self, model: str | None = None) -> bool:
+        target_model = model or self.model
+        try:
+            client = await self._get_client()
+            response = await client.post(
+                f"{self.base_url}/api/generate",
+                json={"model": target_model, "prompt": "", "keep_alive": "10m"},
+            )
+            return response.status_code == 200
+        except Exception:
+            return False
+
+    async def preload_models(self, models: list[str]) -> dict[str, bool]:
+        results = await asyncio.gather(
+            *[self.preload_model(m) for m in models],
+            return_exceptions=True,
+        )
+        return {m: r is True for m, r in zip(models, results)}
+
+    def _should_disable_thinking(self) -> bool:
+        return "qwen3" in self.model.lower()
+
+    async def generate(
+        self,
+        prompt: str,
+        system: str | None = None,
+        images: list[str] | None = None,
+        stream: bool = True,
+        temperature: float = 0.7,
+        num_predict: int | None = None,
+    ) -> AsyncIterator[str]:
+        client = await self._get_client()
+        log.info(f"Sending {'vision' if images else 'text'} generation request to Ollama")
+
+        if images:
+            async for chunk in self._generate_via_chat(
+                client, prompt, system, images, stream, temperature, num_predict
+            ):
+                yield chunk
+            return
+
+        actual_prompt = prompt
+        if self._should_disable_thinking():
+            actual_prompt = f"/no_think\n{prompt}"
+        payload: dict = {
+            "model": self.model,
+            "prompt": actual_prompt,
+            "stream": stream,
+            "options": {
+                "temperature": temperature,
+                "num_ctx": self.num_ctx,
+            },
+        }
+        if num_predict is not None:
+            payload["options"]["num_predict"] = num_predict
+        if system:
+            payload["system"] = system
+
+        async with client.stream(
+            "POST",
+            f"{self.base_url}/api/generate",
+            json=payload,
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if line:
+                    data = json.loads(line)
+                    if text := data.get("response"):
+                        yield text
+                    if data.get("done"):
+                        break
+
+    async def _generate_via_chat(
+        self,
+        client: httpx.AsyncClient,
+        prompt: str,
+        system: str | None,
+        images: list[str],
+        stream: bool,
+        temperature: float,
+        num_predict: int | None,
+    ) -> AsyncIterator[str]:
+        messages = [{"role": "user", "content": prompt, "images": images}]
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "stream": stream,
+            "options": {
+                "temperature": temperature,
+                "num_ctx": self.num_ctx,
+            },
+        }
+        if num_predict is not None:
+            payload["options"]["num_predict"] = num_predict
+        if system:
+            payload["system"] = system
+
+        async with client.stream(
+            "POST",
+            f"{self.base_url}/api/chat",
+            json=payload,
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if line:
+                    data = json.loads(line)
+                    if msg := data.get("message"):
+                        content = msg.get("content", "")
+                        thinking = msg.get("thinking", "")
+                        yield content + thinking
+                    if data.get("done"):
+                        break
+
+    async def chat_completion(
+        self,
+        messages: list[dict],
+        system: str | None = None,
+        tools: list[dict] | None = None,
+    ) -> dict[str, Any]:
+        """Non-streaming chat that collects response into a single dict.
+
+        This is a compatibility wrapper for the legacy orchestrator.
+        """
+        full_content = ""
+        all_tool_calls: list[dict] = []
+        async for chunk in self.chat(
+            messages=messages,
+            system=system,
+            tools=tools,
+            stream=True,
+        ):
+            if msg := chunk.get("message", {}):
+                full_content += msg.get("content", "")
+                if tool_calls := msg.get("tool_calls"):
+                    all_tool_calls.extend(tool_calls)
+        return {"content": full_content, "tool_calls": all_tool_calls}
+
+    async def chat(
+        self,
+        messages: list[dict],
+        system: str | None = None,
+        images: list[str] | None = None,
+        stream: bool = True,
+        temperature: float = 0.7,
+        tools: list[dict] | None = None,
+    ) -> AsyncIterator[dict]:
+        client = await self._get_client()
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "stream": stream,
+            "options": {
+                "temperature": temperature,
+                "num_ctx": self.num_ctx,
+            },
+        }
+        if self._should_disable_thinking():
+            payload["options"]["thinking"] = False
+            payload["options"]["temperature"] = 0.1
+        if self._should_disable_thinking() and messages:
+            last_msg = messages[-1]
+            if last_msg.get("role") == "user":
+                content = last_msg.get("content", "")
+                if isinstance(content, str) and not content.startswith("/no_think"):
+                    last_msg["content"] = f"/no_think\n{content}"
+        if system:
+            if messages and messages[0].get("role") != "system":
+                messages.insert(0, {"role": "system", "content": system})
+        if images and messages:
+            messages[-1]["images"] = images
+        if tools:
+            payload["tools"] = tools
+
+        log.warning(
+            f"[OLLAMA CHAT] model={self.model}, messages={len(messages)}, tools={bool(tools)}"
+        )
+
+        async with client.stream(
+            "POST",
+            f"{self.base_url}/api/chat",
+            json=payload,
+        ) as response:
+            response.raise_for_status()
+            chunk_count = 0
+            async for line in response.aiter_lines():
+                if line:
+                    data = json.loads(line)
+                    chunk_count += 1
+                    if msg := data.get("message", {}):
+                        content = msg.get("content", "")
+                        thinking = msg.get("thinking", "")
+                        if content or thinking:
+                            log.debug(
+                                f"[OLLAMA CHAT] chunk {chunk_count}: "
+                                f"content={len(content)}, thinking={len(thinking)}"
+                            )
+                    yield data
+                    if data.get("done"):
+                        log.debug(f"[OLLAMA CHAT] done after {chunk_count} chunks")
+                        break
+
+    async def list_models(self) -> list[dict]:
+        client = await self._get_client()
+        response = await client.get(f"{self.base_url}/api/tags")
+        response.raise_for_status()
+        return response.json().get("models", [])
+
+    async def health_check(self) -> bool:
+        """Check if the Ollama service is available."""
+        try:
+            client = await self._get_client()
+            # Use full URL instead of relative path
+            response = await client.get(f"{self.base_url}/api/tags", timeout=5.0)
+            return response.status_code == 200
+        except Exception as e:
+            print(f"Health check error: {e}")
+            return False

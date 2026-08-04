@@ -1,0 +1,96 @@
+# ── Secrets ──
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*_key.json
+*credentials*.json
+*secret*
+*token*
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.ipynb_checkpoints/
+
+# ── Node / Electron ──
+node_modules/
+npm-debug.log*
+package-lock.json
+electron/node_modules/
+
+# ── Rust ──
+target/
+Cargo.lock
+
+# ── Databases / data ──
+*.db
+*.sqlite
+*.sqlite3
+data/
+data/*.db
+data/embeddings/
+*.lance
+
+# ── Logs ──
+*.log
+logs/
+*.pid
+
+# ── Model files / audio ──
+*.pt
+*.pth
+*.gguf
+*.bin
+*.wav
+*.mp3
+*.flac
+MOSS-TTS-Nano/
+2dModels/
+public/
+
+# ── Compiled binaries / build artifacts ──
+*.exe
+*.dll
+*.lib
+*.obj
+*.exp
+*.ipdb
+*.iobj
+*.pdb
+*.ilk
+*.o
+*.so
+*.dylib
+*.a
+*.class
+*.jar
+*.node
+
+# ── LaTeX ──
+*.aux
+*.out
+*.toc
+*.bbl
+*.blg
+*.synctex.gz
+
+# ── Tools ──
+.idea/
+.vscode/
+.opencode/
+.codegraph/
+.playwright-mcp/
+.codex/
+DS_Store
+Thumbs.db
+
+# ── WhatsApp auth ──
+services/whatsapp-bailey/auth_info_baileys/

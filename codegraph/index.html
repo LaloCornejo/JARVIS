@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>CodeGraph Visualization</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0f0f1a; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; color: #ccc; }
+    canvas { display: block; }
+    #stats {
+      position: fixed; top: 16px; left: 16px; z-index: 10;
+      background: rgba(15,15,26,0.92);
+      border: 1px solid #2a2a3e; border-radius: 10px;
+      padding: 12px 18px; font-size: 12px; line-height: 1.6;
+    }
+    #legend {
+      position: fixed; bottom: 16px; right: 16px; z-index: 10;
+      background: rgba(15,15,26,0.92);
+      border: 1px solid #2a2a3e; border-radius: 10px;
+      padding: 12px 16px; font-size: 11px; line-height: 2;
+    }
+    #legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+    #legend .line { display: inline-block; width: 18px; height: 2px; margin-right: 6px; vertical-align: middle; }
+    #tooltip {
+      position: fixed; z-index: 20; pointer-events: none;
+      background: rgba(0,0,0,0.88);
+      border: 1px solid #4a4a6a; border-radius: 6px;
+      padding: 8px 12px; font-size: 11px; max-width: 360px;
+      display: none; line-height: 1.5;
+    }
+    #tooltip .name { color: #fff; font-weight: bold; }
+    #tooltip .detail { color: #999; }
+    #tooltip .conn { color: #fb4; font-size: 10px; }
+    #controls {
+      position: fixed; bottom: 16px; left: 16px; z-index: 10;
+      display: flex; gap: 8px;
+    }
+    #controls button {
+      background: rgba(15,15,26,0.92); border: 1px solid #2a2a3e;
+      border-radius: 6px; color: #ccc; padding: 6px 12px;
+      font-size: 11px; cursor: pointer; font-family: inherit;
+    }
+    #controls button:hover { border-color: #6af; color: #fff; }
+    #module-input {
+      display: none; position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%,-50%); z-index: 30;
+      background: #1a1a2e; border: 1px solid #4a4a6a; border-radius: 8px;
+      padding: 20px; min-width: 300px;
+    }
+    #module-input input {
+      background: #0f0f1a; border: 1px solid #2a2a3e; border-radius: 4px;
+      color: #fff; padding: 8px 12px; font-size: 14px; width: 100%;
+      font-family: inherit; outline: none;
+    }
+    #module-input input:focus { border-color: #6af; }
+    #module-input .label { margin-bottom: 10px; color: #999; font-size: 12px; }
+    #module-input .close {
+      position: absolute; top: 8px; right: 12px; color: #666;
+      cursor: pointer; font-size: 18px;
+    }
+    #module-input .hint { margin-top: 8px; color: #555; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <div id="stats">Loading...</div>
+  <div id="legend">
+    <div><span class="dot" style="background:#6af"></span>class</div>
+    <div><span class="dot" style="background:#5d6"></span>interface</div>
+    <div><span class="dot" style="background:#fb4"></span>method</div>
+    <div><span class="dot" style="background:#e65"></span>enum</div>
+    <div><span class="dot" style="background:#b7d"></span>route</div>
+    <hr style="border-color:#2a2a3e;margin:4px 0">
+    <div><span class="line" style="background:rgba(255,187,68,0.5)"></span>calls</div>
+    <div><span class="line" style="background:rgba(255,100,100,0.5)"></span>extends</div>
+    <div><span class="line" style="background:rgba(100,255,100,0.5)"></span>implements</div>
+    <div><span class="line" style="background:rgba(180,180,255,0.5)"></span>contains</div>
+  </div>
+  <div id="controls">
+    <button onclick="resetView()">Reset View</button>
+    <button onclick="toggleModuleInput()">Search Module</button>
+    <button onclick="clearHighlights()">Clear Highlight</button>
+  </div>
+  <div id="tooltip"></div>
+  <div id="module-input">
+    <span class="close" onclick="toggleModuleInput()">&times;</span>
+    <div class="label">Highlight nodes matching module name</div>
+    <input id="moduleName" type="text" placeholder="e.g. admission, call, student, grade" onkeydown="if(event.key==='Enter')doModuleSearch()">
+    <div class="hint">Press Enter to search</div>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script src="nodes.js"></script>
+  <script src="edges.js"></script>
+  <script>
+    (function() {
+      'use strict';
+
+      // ─── Colors ───
+      const COLORS = {
+        class: '#6af', interface: '#5d6', method: '#fb4',
+        enum: '#e65', route: '#b7d'
+      };
+      const EDGE_COLORS = {
+        calls:      { dim: 'rgba(255,187,68,0.08)',  bright: 'rgba(255,187,68,0.7)' },
+        extends:    { dim: 'rgba(255,100,100,0.08)', bright: 'rgba(255,100,100,0.7)' },
+        implements: { dim: 'rgba(100,255,100,0.08)', bright: 'rgba(100,255,100,0.7)' },
+        references: { dim: 'rgba(100,170,255,0.05)', bright: 'rgba(100,170,255,0.4)' },
+        instantiates:{ dim: 'rgba(255,100,255,0.05)',bright: 'rgba(255,100,255,0.4)' },
+        contains:   { dim: 'rgba(180,180,255,0.04)', bright: 'rgba(180,180,255,0.35)' }
+      };
+      const DIM_NODE = 'rgba(50,50,70,0.3)';
+
+      // ─── Data ───
+      const nodes = NODES_DATA;
+      const rawEdges = EDGES_DATA;
+
+      // Build node map
+      const nodeMap = new Map();
+      const radius = Math.sqrt(nodes.length) * 15;
+      nodes.forEach((n, i) => {
+        const angle = (i / nodes.length) * 2 * Math.PI;
+        n.x = radius * Math.cos(angle);
+        n.y = radius * Math.sin(angle);
+        n.vx = 0; n.vy = 0;
+        n.idx = i;
+        nodeMap.set(n.id, i);
+      });
+
+      // Filter & map edges
+      const edges = [];
+      const adj = new Map(); // idx -> Set of connected node idx
+      nodes.forEach((_, i) => adj.set(i, new Set()));
+
+      for (const e of rawEdges) {
+        const si = nodeMap.get(e.source);
+        const ti = nodeMap.get(e.target);
+        if (si === undefined || ti === undefined) continue;
+        const edge = { sourceIdx: si, targetIdx: ti, kind: e.kind };
+        edges.push(edge);
+        adj.get(si).add(ti);
+        adj.get(ti).add(si);
+      }
+
+      document.getElementById('stats').innerHTML =
+        `Nodes: <b>${nodes.length}</b> &middot; Edges: <b>${edges.length}</b>`;
+
+      // ─── Canvas ───
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      let W, H;
+      let view = { x: 0, y: 0, k: 1 };
+      let hoveredNode = null;
+      let selectedNode = null;
+
+      function resize() {
+        W = window.innerWidth;
+        H = window.innerHeight;
+        canvas.width = W;
+        canvas.height = H;
+        render();
+      }
+      window.addEventListener('resize', resize);
+      resize();
+
+      // ─── Zoom / Pan ───
+      let isPanning = false, panStartX, panStartY, panViewStart;
+
+      canvas.addEventListener('wheel', e => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        const factor = e.deltaY > 0 ? 0.88 : 1.12;
+        const newK = Math.max(0.05, Math.min(10, view.k * factor));
+        view.x = mx - (mx - view.x) * (newK / view.k);
+        view.y = my - (my - view.y) * (newK / view.k);
+        view.k = newK;
+        render();
+      }, { passive: false });
+
+      canvas.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+
+        // Only handle click if mouse didn't move much (click vs drag)
+        const startX = e.clientX, startY = e.clientY;
+
+        const mouseupHandler = e => {
+          window.removeEventListener('mouseup', mouseupHandler);
+          const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
+          if (dist > 5) return; // was a drag, not a click
+
+          const rect = canvas.getBoundingClientRect();
+          const mx = (e.clientX - rect.left - view.x) / view.k;
+          const my = (e.clientY - rect.top - view.y) / view.k;
+          const hit = hitTest(mx, my);
+
+          if (hit) {
+            // Toggle: click same node = deselect, click different node = select
+            selectedNode = (selectedNode === hit) ? null : hit;
+            render();
+          } else {
+            // Click on empty space = deselect
+            selectedNode = null;
+            render();
+          }
+        };
+        window.addEventListener('mouseup', mouseupHandler);
+
+        // Start pan regardless
+        isPanning = true;
+        panStartX = e.clientX;
+        panStartY = e.clientY;
+        panViewStart = { x: view.x, y: view.y };
+      });
+
+      function hitTest(mx, my) {
+        for (let i = nodes.length - 1; i >= 0; i--) {
+          const n = nodes[i];
+          const r = (n.kind === 'class' || n.kind === 'interface') ? 7 : 5;
+          const dx = n.x - mx, dy = n.y - my;
+          if (dx * dx + dy * dy < r * r) return n;
+        }
+        return null;
+      }
+
+      window.addEventListener('mousemove', e => {
+        if (isPanning) {
+          view.x = panViewStart.x + (e.clientX - panStartX);
+          view.y = panViewStart.y + (e.clientY - panStartY);
+          render();
+          return;
+        }
+
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left - view.x) / view.k;
+        const my = (e.clientY - rect.top - view.y) / view.k;
+        const hit = hitTest(mx, my);
+
+        if (hit !== hoveredNode) {
+          hoveredNode = hit;
+          render();
+        }
+
+        const tip = document.getElementById('tooltip');
+        if (hit) {
+          const connected = adj.get(hit.idx);
+          const connCount = connected ? connected.size : 0;
+          tip.innerHTML =
+            `<div class="name">${hit.name}</div>` +
+            `<div class="detail">${hit.kind} &middot; ${hit.file_path.split(/[\\/]/).pop()}</div>` +
+            `<div class="detail" style="color:#666;font-size:10px">${hit.qualified_name}</div>` +
+            (connCount > 0 ? `<div class="conn">${connCount} connection${connCount > 1 ? 's' : ''}</div>` : '');
+          tip.style.display = 'block';
+          tip.style.left = (e.clientX + 16) + 'px';
+          tip.style.top = Math.max(8, e.clientY - 10) + 'px';
+          canvas.style.cursor = 'pointer';
+        } else {
+          tip.style.display = 'none';
+          canvas.style.cursor = 'default';
+        }
+      });
+
+      window.addEventListener('mouseup', () => { isPanning = false; });
+
+      // ─── Force Simulation ───
+      let alpha = 0.5;
+      let running = true;
+
+      function simulate() {
+        if (!running) return;
+
+        // Center
+        let cx = 0, cy = 0;
+        for (const n of nodes) { cx += n.x; cy += n.y; }
+        cx = W / 2 - cx / nodes.length;
+        cy = H / 2 - cy / nodes.length;
+        for (const n of nodes) { n.x += cx * 0.005; n.y += cy * 0.005; }
+
+        // Charge repulsion (Barnes-Hut simplified — full N-body)
+        for (let i = 0; i < nodes.length; i++) {
+          const a = nodes[i];
+          let fx = 0, fy = 0;
+          for (let j = 0; j < nodes.length; j++) {
+            if (i === j) continue;
+            const b = nodes[j];
+            let dx = b.x - a.x, dy = b.y - a.y;
+            let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const strength = (a.kind === 'class' || a.kind === 'interface') ? -200 : -80;
+          const f = strength * alpha / (dist * dist + 10);
+            fx += f * dx / dist;
+            fy += f * dy / dist;
+          }
+          a.vx = (a.vx || 0) + fx;
+          a.vy = (a.vy || 0) + fy;
+        }
+
+        // Link attraction
+        for (const e of edges) {
+          const s = nodes[e.sourceIdx], t = nodes[e.targetIdx];
+          if (!s || !t) continue;
+          let dx = t.x - s.x, dy = t.y - s.y;
+          let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const targetDist = (e.kind === 'extends' || e.kind === 'implements') ? 40 : 70;
+          const bias = 0.05 * alpha;
+          const fx = (dist - targetDist) / dist * bias;
+          s.vx = (s.vx || 0) + fx * dx;
+          s.vy = (s.vy || 0) + fx * dy;
+          t.vx = (t.vx || 0) - fx * dx;
+          t.vy = (t.vy || 0) - fx * dy;
+        }
+
+        // Collision
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const a = nodes[i], b = nodes[j];
+            let dx = b.x - a.x, dy = b.y - a.y;
+            let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const ra = (a.kind === 'class' || a.kind === 'interface') ? 10 : 5;
+          const rb = (b.kind === 'class' || b.kind === 'interface') ? 10 : 5;
+          if (dist < ra + rb) {
+            const overlap = (ra + rb - dist) / dist * 0.1 * alpha;
+              a.x -= overlap * dx; a.y -= overlap * dy;
+              b.x += overlap * dx; b.y += overlap * dy;
+            }
+          }
+        }
+
+        // Apply velocity
+        for (const n of nodes) {
+          n.x = (n.x || 0) + (n.vx || 0);
+          n.y = (n.y || 0) + (n.vy || 0);
+          n.vx = (n.vx || 0) * (1 - 0.4);
+          n.vy = (n.vy || 0) * (1 - 0.4);
+        }
+
+        alpha += (0 - alpha) * 0.03;
+
+        render();
+
+        if (alpha > 0.005) {
+          requestAnimationFrame(simulate);
+        } else {
+          running = false;
+          render();
+        }
+      }
+
+      // ─── Render with highlight (selected takes priority over hover) ───
+      function render() {
+        ctx.clearRect(0, 0, W, H);
+        ctx.save();
+        ctx.translate(view.x, view.y);
+        ctx.scale(view.k, view.k);
+
+        // Active node: selected > hovered
+        const activeNode = selectedNode || hoveredNode;
+
+        const connectedSet = new Set();
+        const connectedEdges = new Set();
+        if (activeNode) {
+          connectedSet.add(activeNode.idx);
+          const neighbors = adj.get(activeNode.idx);
+          if (neighbors) {
+            for (const nidx of neighbors) {
+              connectedSet.add(nidx);
+            }
+          }
+          for (let i = 0; i < edges.length; i++) {
+            const e = edges[i];
+            if (e.sourceIdx === activeNode.idx || e.targetIdx === activeNode.idx) {
+              connectedEdges.add(i);
+            }
+          }
+        }
+
+        const hasHighlight = activeNode !== null;
+        const isLocked = selectedNode !== null;
+
+        // ── Draw edges ──
+        for (let i = 0; i < edges.length; i++) {
+          const e = edges[i];
+          const s = nodes[e.sourceIdx], t = nodes[e.targetIdx];
+          if (!s || !t) continue;
+
+          const isHighlighted = hasHighlight && connectedEdges.has(i);
+          const colors = EDGE_COLORS[e.kind] || { dim: 'rgba(255,255,255,0.03)', bright: 'rgba(255,255,255,0.2)' };
+
+          ctx.strokeStyle = isHighlighted ? colors.bright : (hasHighlight ? colors.dim : colors.dim);
+          ctx.lineWidth = isHighlighted ? 2 : 0.5;
+          ctx.beginPath();
+          ctx.moveTo(s.x, s.y);
+          ctx.lineTo(t.x, t.y);
+
+          // Arrow for extends/implements
+          if (isHighlighted && (e.kind === 'extends' || e.kind === 'implements')) {
+            const angle = Math.atan2(t.y - s.y, t.x - s.x);
+            const headLen = 6;
+            ctx.moveTo(t.x, t.y);
+            ctx.lineTo(
+              t.x - headLen * Math.cos(angle - 0.4),
+              t.y - headLen * Math.sin(angle - 0.4)
+            );
+            ctx.moveTo(t.x, t.y);
+            ctx.lineTo(
+              t.x - headLen * Math.cos(angle + 0.4),
+              t.y - headLen * Math.sin(angle + 0.4)
+            );
+          }
+
+          ctx.stroke();
+        }
+
+        // ── Draw nodes ──
+        for (const n of nodes) {
+          const isActive = hasHighlight && n.idx === activeNode.idx;
+          const isConnected = hasHighlight && connectedSet.has(n.idx) && !isActive;
+
+          let r;
+          if (isActive) r = 10;
+          else if (n.kind === 'class' || n.kind === 'interface') r = 5;
+          else if (n.kind === 'route') r = 4;
+          else r = 3;
+
+          // Glow for active node
+          if (isActive) {
+            const glowR = isLocked ? 28 : 20;
+            const gradient = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, glowR);
+            gradient.addColorStop(0, isLocked ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.15)');
+            gradient.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, glowR, 0, 2 * Math.PI);
+            ctx.fill();
+
+            // Selection ring
+            if (isLocked) {
+              ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.arc(n.x, n.y, r + 4, 0, 2 * Math.PI);
+              ctx.stroke();
+            }
+          }
+
+          ctx.fillStyle = isActive ? '#fff'
+                        : isConnected ? COLORS[n.kind] || '#888'
+                        : hasHighlight ? DIM_NODE
+                        : COLORS[n.kind] || '#888';
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
+          ctx.fill();
+
+          if (isActive) {
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          } else if (isConnected) {
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+
+          // Label
+          if (isActive) {
+            ctx.fillStyle = '#fff';
+            ctx.font = '11px system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(n.name, n.x, n.y - r - 8);
+          }
+        }
+
+        ctx.restore();
+      }
+
+      // ─── Controls ───
+      function resetView() {
+        view = { x: 0, y: 0, k: 1 };
+        render();
+      }
+
+      function clearHighlights() {
+        hoveredNode = null;
+        selectedNode = null;
+        for (const n of nodes) n._hl = false;
+        render();
+        document.getElementById('tooltip').style.display = 'none';
+      }
+
+      function toggleModuleInput() {
+        const el = document.getElementById('module-input');
+        el.style.display = el.style.display === 'block' ? 'none' : 'block';
+        if (el.style.display === 'block') document.getElementById('moduleName').focus();
+        else document.getElementById('moduleName').value = '';
+      }
+
+      function doModuleSearch() {
+        const val = document.getElementById('moduleName').value.trim().toLowerCase();
+        if (!val) return;
+        toggleModuleInput();
+        for (const n of nodes) {
+          n._hl = n.name.toLowerCase().includes(val) ||
+                  n.file_path.toLowerCase().includes(val);
+        }
+        // Reheat simulation slightly to separate highlighted nodes
+        alpha = 0.2;
+        if (!running) { running = true; simulate(); }
+        render();
+      }
+
+      // Expose to global for onclick handlers
+      window.resetView = resetView;
+      window.clearHighlights = clearHighlights;
+      window.toggleModuleInput = toggleModuleInput;
+      window.doModuleSearch = doModuleSearch;
+
+      // ─── Start ───
+      simulate();
+    })();
+  </script>
+</body>
+</html>

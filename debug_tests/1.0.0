@@ -1,0 +1,34 @@
+Collecting google-genai
+  Using cached google_genai-1.54.0-py3-none-any.whl.metadata (47 kB)
+Requirement already satisfied: anyio<5.0.0,>=4.8.0 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from google-genai) (4.9.0)
+Collecting google-auth<3.0.0,>=2.14.1 (from google-auth[requests]<3.0.0,>=2.14.1->google-genai)
+  Downloading google_auth-2.43.0-py2.py3-none-any.whl.metadata (6.6 kB)
+Requirement already satisfied: httpx<1.0.0,>=0.28.1 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from google-genai) (0.28.1)
+Requirement already satisfied: pydantic<3.0.0,>=2.9.0 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from google-genai) (2.11.3)
+Requirement already satisfied: requests<3.0.0,>=2.28.1 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from google-genai) (2.32.3)
+Requirement already satisfied: tenacity<9.2.0,>=8.2.3 in c:\users\lalo\anaconda3\lib\site-packages (from google-genai) (9.0.0)
+Requirement already satisfied: websockets<15.1.0,>=13.0.0 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from google-genai) (15.0.1)
+Requirement already satisfied: typing-extensions<5.0.0,>=4.11.0 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from google-genai) (4.12.2)
+Requirement already satisfied: idna>=2.8 in c:\users\lalo\anaconda3\lib\site-packages (from anyio<5.0.0,>=4.8.0->google-genai) (3.7)
+Requirement already satisfied: sniffio>=1.1 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from anyio<5.0.0,>=4.8.0->google-genai) (1.3.1)
+Requirement already satisfied: cachetools<7.0,>=2.0.0 in c:\users\lalo\anaconda3\lib\site-packages (from google-auth<3.0.0,>=2.14.1->google-auth[requests]<3.0.0,>=2.14.1->google-genai) (5.5.1)
+Requirement already satisfied: pyasn1-modules>=0.2.1 in c:\users\lalo\anaconda3\lib\site-packages (from google-auth<3.0.0,>=2.14.1->google-auth[requests]<3.0.0,>=2.14.1->google-genai) (0.2.8)
+Collecting rsa<5,>=3.1.4 (from google-auth<3.0.0,>=2.14.1->google-auth[requests]<3.0.0,>=2.14.1->google-genai)
+  Downloading rsa-4.9.1-py3-none-any.whl.metadata (5.6 kB)
+Requirement already satisfied: certifi in c:\users\lalo\appdata\roaming\python\python313\site-packages (from httpx<1.0.0,>=0.28.1->google-genai) (2025.1.31)
+Requirement already satisfied: httpcore==1.* in c:\users\lalo\appdata\roaming\python\python313\site-packages (from httpx<1.0.0,>=0.28.1->google-genai) (1.0.8)
+Requirement already satisfied: h11<0.15,>=0.13 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from httpcore==1.*->httpx<1.0.0,>=0.28.1->google-genai) (0.14.0)
+Requirement already satisfied: annotated-types>=0.6.0 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from pydantic<3.0.0,>=2.9.0->google-genai) (0.7.0)
+Requirement already satisfied: pydantic-core==2.33.1 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from pydantic<3.0.0,>=2.9.0->google-genai) (2.33.1)
+Requirement already satisfied: typing-inspection>=0.4.0 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from pydantic<3.0.0,>=2.9.0->google-genai) (0.4.0)
+Requirement already satisfied: charset-normalizer<4,>=2 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from requests<3.0.0,>=2.28.1->google-genai) (3.4.1)
+Requirement already satisfied: urllib3<3,>=1.21.1 in c:\users\lalo\appdata\roaming\python\python313\site-packages (from requests<3.0.0,>=2.28.1->google-genai) (2.4.0)
+Requirement already satisfied: pyasn1<0.5.0,>=0.4.6 in c:\users\lalo\anaconda3\lib\site-packages (from pyasn1-modules>=0.2.1->google-auth<3.0.0,>=2.14.1->google-auth[requests]<3.0.0,>=2.14.1->google-genai) (0.4.8)
+Using cached google_genai-1.54.0-py3-none-any.whl (262 kB)
+Downloading google_auth-2.43.0-py2.py3-none-any.whl (223 kB)
+Downloading rsa-4.9.1-py3-none-any.whl (34 kB)
+Installing collected packages: rsa, google-auth, google-genai
+Successfully installed google-auth-2.43.0 google-genai-1.54.0 rsa-4.9.1
+
+[notice] A new release of pip is available: 25.0.1 -> 25.3
+[notice] To update, run: python.exe -m pip install --upgrade pip

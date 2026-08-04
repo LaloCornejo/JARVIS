@@ -1,0 +1,24 @@
+name: morning_briefing
+description: Daily morning briefing with weather, calendar, and news
+
+trigger:
+  type: schedule
+  time: "08:00"
+  days: [Mon, Tue, Wed, Thu, Fri]
+
+variables:
+  greeting: "Good morning! Here's your daily briefing."
+
+steps:
+  - action: get_current_time
+    params: {}
+
+  - action: web_search
+    params:
+      query: "weather today"
+      num_results: 1
+
+  - action: web_search
+    params:
+      query: "top tech news today"
+      num_results: 3

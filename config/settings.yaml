@@ -1,0 +1,288 @@
+jarvis:
+  name: "JARVIS"
+  wake_word: "hey jarvis"
+  timezone: "America/Mexico_City"
+
+llm:
+  backend: omniroute
+  temperature: 0.7
+  stream: true
+  primary_model: null # Will use backend-specific primary model
+  fast_model: null # Will use backend-specific fast model
+  vision_model: null # Will use backend-specific vision model
+  fallback_model: null # Will use backend-specific fallback model
+  # Per-model backend override
+  primary_backend: omniroute
+  fast_backend: omniroute
+  vision_backend: llamacpp
+
+ollama:
+  api_url: http://localhost:11434
+  primary_model: huihui_ai/qwen3.5-abliterated:2B
+  fast_model: huihui_ai/qwen3.5-abliterated:2B
+  vision_model: huihui_ai/qwen3.5-abliterated:2B
+  fallback_model: huihui_ai/qwen3.5-abliterated:2B
+  preload: true
+
+copilot:
+  api_url: https://api.githubcopilot.com
+  primary_model: claude-sonnet-4.5
+  fast_model: claude-sonnet-4.5
+  vision_model: claude-sonnet-4.5
+  fallback_model: claude-sonnet-4.5
+
+nvidia:
+  api_url: https://integrate.api.nvidia.com/v1
+  api_key_env: NVIDIA_API_KEY
+  primary_model: moonshotai/kimi-k2.5
+  fast_model: moonshotai/kimi-k2.5
+  vision_model: moonshotai/kimi-k2.5
+  fallback_model: moonshotai/kimi-k2.5
+
+gemini:
+  api_url: https://generativelanguage.googleapis.com/v1beta
+  api_key_env: GEMINI_API_KEY
+  primary_model: gemini-2.5-flash
+  fast_model: gemini-2.5-flash
+  vision_model: gemini-2.5-flash
+  fallback_model: gemini-2.5-pro
+
+openrouter:
+  api_url: https://openrouter.ai/api/v1
+  api_key_env: OPENROUTER_API_KEY
+  primary_model: qwen/qwen3.6-plus:free
+  fast_model: qwen/qwen3.6-plus:free
+  vision_model: qwen/qwen3.6-plus:free
+  fallback_model: qwen/qwen3.6-plus:free
+
+llamacpp:
+  api_url: http://127.0.0.1:8080/v1
+  api_key: ~
+  primary_model: mradermacher/Huihui-Qwen3.5-2B-abliterated-GGUF:Q4_K_M
+  fast_model: mradermacher/Huihui-Qwen3.5-2B-abliterated-GGUF:Q4_K_M
+  vision_model: mradermacher/Huihui-Qwen3.5-2B-abliterated-GGUF:Q4_K_M
+  fallback_model: mradermacher/Huihui-Qwen3.5-2B-abliterated-GGUF:Q4_K_M
+
+omniroute:
+  api_url: http://localhost:20128/v1
+  api_key: sk-0b07d50972a89762-6456be-54ed4f42
+  primary_model: opencode/deepseek-v4-flash-free
+  fast_model: opencode/deepseek-v4-flash-free
+  vision_model: opencode/deepseek-v4-flash-free
+  fallback_model: opencode/deepseek-v4-flash-free
+
+vllm:
+  api_url: http://localhost:8000/v1
+  primary_model: huihui-ai/Huihui-Qwen3.5-4B-abliterated
+  fast_model: huihui-ai/Huihui-Qwen3.5-4B-abliterated
+  vision_model: huihui-ai/Huihui-Qwen3.5-4B-abliterated
+  fallback_model: huihui-ai/Huihui-Qwen3.5-4B-abliterated
+
+voice_input:
+  stt_backend: faster-whisper
+  model: tiny.en
+  device: cuda
+  compute_type: float16
+  vad: silero
+  silence_duration: 0.5
+  input_device: null
+  startup_enabled: true
+
+proactive:
+  quiet_hours_start: 23 # hour (24h format)
+  quiet_hours_end: 7 # hour (24h format)
+
+tts:
+  engine: xtts # "xtts", "supertonic", or "mosstts_nano"
+
+  # Shared
+  language: en
+
+  # XTTS-specific (used when engine: xtts)
+  xtts:
+    base_url: http://localhost:8020
+    speaker: duckie
+    sample_rate: 24000
+
+  # Supertonic-specific (used when engine: supertonic)
+  # Install: pip install supertonic
+  # Docs:    https://supertone-inc.github.io/supertonic-py/
+  supertonic:
+    voice: M1 # Built-in: M1-M5 (male), F1-F5 (female)
+    custom_voice_path: null # Path to Voice Builder JSON export (overrides voice)
+    speed: 1.05 # 0.7 (slow) to 2.0 (fast)
+    steps: 8 # 5 (low quality) to 12 (high quality)
+
+  # MOSS-TTS-Nano-specific (used when engine: mosstts_nano)
+  # Uses ONNX CPU runtime (no PyTorch/torchcodec needed).
+  # Models auto-download from HuggingFace on first use.
+  mosstts_nano:
+    voice: "Ava" # Built-in preset (see get_speakers)
+    prompt_audio_path: 'C:\Users\Lalo\Documents\Code\JARVIS\reference.wav' # zero-shot voice clone reference
+    audio_temperature: 0.8
+    audio_top_p: 0.95
+    audio_top_k: 25
+    audio_repetition_penalty: 1.2
+    max_new_frames: 375
+    voice_clone_max_text_tokens: 75
+
+browser:
+  default: zen
+  automation: playwright
+
+tools:
+  enabled:
+    # Core System
+    - system
+    - time
+    - system_control
+    - terminal
+    # File Operations (MCP)
+    - file_search
+    - file_modify
+    - mcp_filesystem
+    # Web & Search
+    - web
+    - web_search
+    - youtube
+    # Communication
+    - email
+    - discord
+    - telegram
+    - whatsapp
+    # Development
+    - code
+    - github
+    - docker
+    - mcp_github_mcp
+    # Smart Home
+    - homeassistant
+    # Media & Entertainment
+    - music
+    - spotify
+    - vlc
+    # Productivity
+    - calendar
+    - notes
+    - clipboard
+    - screenshot
+    - screentime
+    # Memory & Knowledge
+    - memory
+    - mcp_memory
+    - episodic_memory
+    # MCP Servers
+    - mcp
+    - browser
+    - mcp_browser
+    - sequential_thinking
+    - mcp_sequential_thinking
+    - mcp_sqlite
+    - mcp_search
+    - mcp_exa
+    - mcp_context7
+    - mcp_fetch
+    # Advanced Features
+    - performance
+    - agents
+    - workflows
+    - users
+    - predictions
+  require_approval:
+    - system_settings
+
+memory:
+  vector_db: lancedb
+  embedding_model: all-MiniLM-L6-v2
+  db_path: ./data/vectors
+
+security:
+  offline_mode: false
+  encrypt_memory: true
+  terminal_whitelist:
+    - ls
+    - cat
+    - grep
+    - python
+
+mcp:
+  enabled: true
+  auto_connect: true
+
+  servers:
+    filesystem:
+      enabled: true
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+      env: {}
+
+    fetch:
+      enabled: true
+      command: uvx
+      args: ["mcp-server-fetch"]
+      env: {}
+
+    github:
+      enabled: true
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-github"]
+      env:
+        GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+
+    sequentialthinking:
+      enabled: true
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+      env: {}
+
+    memory:
+      enabled: true
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-memory"]
+      env: {}
+
+    sqlite:
+      enabled: true
+      command: uvx
+      args: ["mcp-server-sqlite", "--db-path", "./data/jarvis.db"]
+      env: {}
+
+    redis:
+      enabled: false
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-redis"]
+      env:
+        REDIS_URL: "redis://localhost:6379"
+
+    playwright:
+      enabled: true
+      command: npx
+      args:
+        - "-y"
+        - "@playwright/mcp@latest"
+        - "--browser"
+        - "firefox"
+        - "--user-data-dir"
+        - "C:\\Users\\Lalo\\AppData\\Roaming\\zen\\Profiles\\9zb7xjm1.Default (release)"
+      env: {}
+
+    context7:
+      enabled: true
+      command: npx
+      args: ["-y", "@upstash/context7-mcp"]
+      env: {}
+
+    exa:
+      enabled: true
+      command: npx
+      args: ["-y", "exa-mcp-server"]
+      env:
+        EXA_API_KEY: ${EXA_API_KEY}
+
+    browserbase:
+      enabled: false
+      command: npx
+      args: ["-y", "@browserbasehq/mcp-server-browserbase"]
+      env:
+        BROWSERBASE_API_KEY: ""
+        BROWSERBASE_PROJECT_ID: ""
